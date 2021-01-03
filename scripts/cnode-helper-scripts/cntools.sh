@@ -49,8 +49,7 @@ shift $((OPTIND -1))
 # get common env variables
 if ! . "${CNODE_HOME}"/scripts/env; then
   [[ ${CNTOOLS_MODE} = "CONNECTED" ]] && exit 1
-  echo -e "\nERROR: CNTools run in offline mode and failed to automatically grab common env variables\nPlease uncomment all variables in 'User Variables' section and set values manually\n"
-  exit 1
+  myExit 1 "\nERROR: CNTools run in offline mode and failed to automatically grab common env variables\nPlease uncomment all variables in 'User Variables' section and set values manually\n"
 fi
 
 # get cntools config parameters
@@ -58,8 +57,6 @@ fi
 
 # get helper functions from library file
 . "${CNODE_HOME}"/scripts/cntools.library
-
-[[ $(${CCLI} version | head -1 | awk '{print $2}' | tr -d '.') -lt 1230 ]] && myExit 1 "ERROR!! CNTools has now been upgraded to support cardano-node 1.23 or higher. Please update cardano-node or use node-1.21 branch for CNTools\n"
 
 URL_RAW="https://raw.githubusercontent.com/cardano-community/guild-operators/${BRANCH}"
 URL="${URL_RAW}/scripts/cnode-helper-scripts"
@@ -78,7 +75,7 @@ if ! need_cmd "curl" || \
    ! need_cmd "sed" || \
    ! need_cmd "awk" || \
    ! need_cmd "column" || \
-   ! protectionPreRequisites; then myExit 1
+   ! protectionPreRequisites; then waitForInput "Missing one or more of the required command line tools, press any key to exit"; myExit 1
 fi
 
 # Do some checks when run in connected mode
@@ -201,7 +198,7 @@ if [[ "${PROTOCOL}" == "Cardano" ]]; then
         ((byron_epochs--))
         ((shelley_epochs++))
       done
-      node_sync="NODE SYNC:\n$(printTable ',' "$(echo -e "Epoch,Slot in Epoch,Slot\n${epoch},${slot_in_epoch},${slot_num}")")"
+      node_sync="NODE SYNC: Epoch[${epoch}] - Slot in Epoch[${slot_in_epoch}] - Slot[${slot_num}]\n"
       if [[ ${calc_slot} -ne ${slot_num} ]]; then
         myExit 1 "${FG_YELLOW}WARN${NC}: Failed to calculate shelley transition epoch\n\n${node_sync}"
       elif [[ ${shelley_epochs} -eq 0 ]]; then
@@ -335,14 +332,14 @@ case $OPERATION in
     stake_vk_file="${WALLET_FOLDER}/${wallet_name}/${WALLET_STAKE_VK_FILENAME}"
     stake_sk_file="${WALLET_FOLDER}/${wallet_name}/${WALLET_STAKE_SK_FILENAME}"
 
-    if [[ $(find "${WALLET_FOLDER}/${wallet_name}" -type f -printf '.' | wc -c) -gt 0 ]]; then
+    if [[ $(find "${WALLET_FOLDER}/${wallet_name}" -type f -print0 | wc -c) -gt 0 ]]; then
       say "${FG_RED}WARN${NC}: A wallet ${FG_GREEN}$wallet_name${NC} already exists"
       say "      Choose another name or delete the existing one"
       waitForInput && continue
     fi
 
-    ${CCLI} shelley address key-gen --verification-key-file "${payment_vk_file}" --signing-key-file "${payment_sk_file}"
-    ${CCLI} shelley stake-address key-gen --verification-key-file "${stake_vk_file}" --signing-key-file "${stake_sk_file}"
+    ${CCLI} address key-gen --verification-key-file "${payment_vk_file}" --signing-key-file "${payment_sk_file}"
+    ${CCLI} stake-address key-gen --verification-key-file "${stake_vk_file}" --signing-key-file "${stake_sk_file}"
     chmod 700 ${WALLET_FOLDER}/${wallet_name}/*
     getBaseAddress ${wallet_name}
     getPayAddress ${wallet_name}
@@ -386,7 +383,7 @@ case $OPERATION in
       waitForInput && continue
     fi
     
-    if [[ $(find "${WALLET_FOLDER}/${wallet_name}" -type f -printf '.' | wc -c) -gt 0 ]]; then
+    if [[ $(find "${WALLET_FOLDER}/${wallet_name}" -type f -print0 | wc -c) -gt 0 ]]; then
       say "${FG_RED}WARN${NC}: A wallet ${FG_GREEN}$wallet_name${NC} already exists"
       say "      Choose another name or delete the existing one"
       waitForInput && continue
@@ -444,11 +441,11 @@ EOF
 }
 EOF
     
-    ${CCLI} shelley key verification-key --signing-key-file "${payment_sk_file}" --verification-key-file "${TMP_FOLDER}"/payment.evkey
-    ${CCLI} shelley key verification-key --signing-key-file "${stake_sk_file}" --verification-key-file "${TMP_FOLDER}"/stake.evkey
+    ${CCLI} key verification-key --signing-key-file "${payment_sk_file}" --verification-key-file "${TMP_FOLDER}"/payment.evkey
+    ${CCLI} key verification-key --signing-key-file "${stake_sk_file}" --verification-key-file "${TMP_FOLDER}"/stake.evkey
 
-    ${CCLI} shelley key non-extended-key --extended-verification-key-file "${TMP_FOLDER}"/payment.evkey --verification-key-file "${payment_vk_file}"
-    ${CCLI} shelley key non-extended-key --extended-verification-key-file "${TMP_FOLDER}"/stake.evkey --verification-key-file "${stake_vk_file}"
+    ${CCLI} key non-extended-key --extended-verification-key-file "${TMP_FOLDER}"/payment.evkey --verification-key-file "${payment_vk_file}"
+    ${CCLI} key non-extended-key --extended-verification-key-file "${TMP_FOLDER}"/stake.evkey --verification-key-file "${stake_vk_file}"
     chmod 700 ${WALLET_FOLDER}/${wallet_name}/*
 
     getBaseAddress ${wallet_name}
@@ -507,11 +504,11 @@ EOF
     
     say "# Select wallet to register (only non-registered wallets shown)"
     if [[ ${op_mode} = "online" ]]; then
-      if ! selectWallet "non-reg" "${WALLET_PAY_SK_FILENAME}" "${WALLET_STAKE_SK_FILENAME}" "${WALLET_STAKE_VK_FILENAME}"; then
+      if ! selectWallet "non-reg" "${WALLET_PAY_SK_FILENAME}" "${WALLET_PAY_VK_FILENAME}" "${WALLET_STAKE_SK_FILENAME}" "${WALLET_STAKE_VK_FILENAME}"; then
         [[ "${dir_name}" != "[Esc] Cancel" ]] && waitForInput; continue
       fi
     else
-      if ! selectWallet "non-reg" "${WALLET_STAKE_VK_FILENAME}"; then
+      if ! selectWallet "non-reg" "${WALLET_PAY_VK_FILENAME}" "${WALLET_STAKE_VK_FILENAME}"; then
         [[ "${dir_name}" != "[Esc] Cancel" ]] && waitForInput; continue
       fi
     fi
@@ -557,11 +554,11 @@ EOF
     
     say "# Select wallet to de-register (only registered wallets shown)"
     if [[ ${op_mode} = "online" ]]; then
-      if ! selectWallet "delegate" "${WALLET_PAY_SK_FILENAME}" "${WALLET_STAKE_SK_FILENAME}" "${WALLET_STAKE_VK_FILENAME}"; then
+      if ! selectWallet "delegate" "${WALLET_PAY_SK_FILENAME}" "${WALLET_PAY_VK_FILENAME}" "${WALLET_STAKE_SK_FILENAME}" "${WALLET_STAKE_VK_FILENAME}"; then
         [[ "${dir_name}" != "[Esc] Cancel" ]] && waitForInput; continue
       fi
     else
-      if ! selectWallet "delegate" "${WALLET_STAKE_VK_FILENAME}"; then
+      if ! selectWallet "delegate" "${WALLET_PAY_VK_FILENAME}" "${WALLET_STAKE_VK_FILENAME}"; then
         [[ "${dir_name}" != "[Esc] Cancel" ]] && waitForInput; continue
       fi
     fi
@@ -627,7 +624,7 @@ EOF
 
     while IFS= read -r -d '' wallet; do
       wallet_name=$(basename ${wallet})
-      enc_files=$(find "${wallet}" -mindepth 1 -maxdepth 1 -type f -name '*.gpg' -printf '.' | wc -c)
+      enc_files=$(find "${wallet}" -mindepth 1 -maxdepth 1 -type f -name '*.gpg' -print0 | wc -c)
       if [[ ${CNTOOLS_MODE} = "CONNECTED" ]] && isWalletRegistered ${wallet_name}; then registered="yes"; else registered="no"; fi
       echo
       if [[ ${enc_files} -gt 0 && ${registered} = "yes" ]]; then
@@ -700,7 +697,7 @@ EOF
       [[ "${dir_name}" != "[Esc] Cancel" ]] && waitForInput; continue
     fi
     
-    enc_files=$(find "${WALLET_FOLDER}/${wallet_name}" -mindepth 1 -maxdepth 1 -type f -name '*.gpg' -printf '.' | wc -c)
+    enc_files=$(find "${WALLET_FOLDER}/${wallet_name}" -mindepth 1 -maxdepth 1 -type f -name '*.gpg' -print0 | wc -c)
 
     if [[ ${enc_files} -gt 0 ]]; then
       say "Wallet: ${FG_GREEN}${wallet_name}${NC} (${FG_YELLOW}encrypted${NC})" "log"
@@ -1281,8 +1278,8 @@ EOF
 
     say "" 1
     say "creating delegation cert" 1 "log"
-    say "$ ${CCLI} shelley stake-address delegation-certificate --stake-verification-key-file ${stake_vk_file} --cold-verification-key-file ${pool_coldkey_vk_file} --out-file ${delegation_cert_file}" 2
-    ${CCLI} shelley stake-address delegation-certificate --stake-verification-key-file "${stake_vk_file}" --cold-verification-key-file "${pool_coldkey_vk_file}" --out-file "${delegation_cert_file}"
+    say "$ ${CCLI} stake-address delegation-certificate --stake-verification-key-file ${stake_vk_file} --cold-verification-key-file ${pool_coldkey_vk_file} --out-file ${delegation_cert_file}" 2
+    ${CCLI} stake-address delegation-certificate --stake-verification-key-file "${stake_vk_file}" --cold-verification-key-file "${pool_coldkey_vk_file}" --out-file "${delegation_cert_file}"
 
     if ! delegate "${stake_sk_file}" "${payment_sk_file}" "${base_addr}" "${pool_coldkey_vk_file}" "${delegation_cert_file}" ; then
       if [[ ${op_mode} = "online" ]]; then
@@ -1470,14 +1467,14 @@ EOF
       waitForInput && continue
     fi
 
-    ${CCLI} shelley node key-gen-KES --verification-key-file "${pool_hotkey_vk_file}" --signing-key-file "${pool_hotkey_sk_file}"
+    ${CCLI} node key-gen-KES --verification-key-file "${pool_hotkey_vk_file}" --signing-key-file "${pool_hotkey_sk_file}"
     if [ -f "${POOL_FOLDER}-pregen/${pool_name}/${POOL_ID_FILENAME}" ]; then
       mv ${POOL_FOLDER}'-pregen/'${pool_name}/* ${POOL_FOLDER}/${pool_name}/
       rm -r ${POOL_FOLDER}'-pregen/'${pool_name}
     else
-      ${CCLI} shelley node key-gen --cold-verification-key-file "${pool_coldkey_vk_file}" --cold-signing-key-file "${pool_coldkey_sk_file}" --operational-certificate-issue-counter-file "${pool_opcert_counter_file}"
+      ${CCLI} node key-gen --cold-verification-key-file "${pool_coldkey_vk_file}" --cold-signing-key-file "${pool_coldkey_sk_file}" --operational-certificate-issue-counter-file "${pool_opcert_counter_file}"
     fi
-    ${CCLI} shelley node key-gen-VRF --verification-key-file "${pool_vrf_vk_file}" --signing-key-file "${pool_vrf_sk_file}"
+    ${CCLI} node key-gen-VRF --verification-key-file "${pool_vrf_vk_file}" --signing-key-file "${pool_vrf_sk_file}"
     chmod 700 ${POOL_FOLDER}/${pool_name}/*
     getPoolID ${pool_name}
 
@@ -1522,7 +1519,7 @@ EOF
 
     pledge_ada=50000 # default pledge
     [[ -f "${pool_config}" ]] && pledge_ada=$(jq -r '.pledgeADA //0' "${pool_config}")
-    read -r -p "Pledge (in ADA, default: ${pledge_ada}): " pledge_enter
+    read -r -p "Pledge (in ADA, default: $(formatAda ${pledge_ada})): " pledge_enter
     pledge_enter="${pledge_enter//,}"
     if [[ -n "${pledge_enter}" ]]; then
       if ! ADAtoLovelace "${pledge_enter}" >/dev/null; then
@@ -1553,7 +1550,7 @@ EOF
       cost_ada_saved=$(jq -r '.costADA //0' "${pool_config}")
       [[ ${cost_ada_saved} -gt ${minPoolCost} ]] && cost_ada=${cost_ada_saved}
     fi
-    read -r -p "Cost (in ADA, minimum: ${minPoolCost}, default: ${cost_ada}): " cost_enter
+    read -r -p "Cost (in ADA, minimum: ${minPoolCost}, default: $(formatAda ${cost_ada})): " cost_enter
     cost_enter="${cost_enter//,}"
     if [[ -n "${cost_enter}" ]]; then
       if ! ADAtoLovelace "${cost_enter}" >/dev/null; then
@@ -1678,7 +1675,7 @@ EOF
     # ToDo SRV & IPv6 support
     if [[ -f "${pool_config}" && $(jq '.relays | length' "${pool_config}") -gt 0 ]]; then
       say "\nPrevious relay configuration:\n"
-      printTable ',' "$(say 'Type,Address,Port' | cat - <(jq -r -c '.relays[] | [.type //"-",.address //"-",.port //"-"] | @csv //empty' "${pool_config}") | tr -d '"')"
+      jq -r '["TYPE","ADDRESS","PORT"], (.relays[] | [.type //"-",.address //"-",.port //"-"]) | @tsv' "${pool_config}" | column -t
       say "\nReuse previous configuration?"
       select_opt "[y] Yes" "[n] No" "[Esc] Cancel"
       case $? in
@@ -1699,51 +1696,47 @@ EOF
       while true; do
         select_opt "[d] A or AAAA DNS record (single)" "[4] IPv4 address (multiple)" "[Esc] Cancel"
         case $? in
-          0) echo && read -r -p "Enter relays's DNS record, only A or AAAA DNS records: " relay_dns_enter
+          0) read -r -p "Enter relays's DNS record, only A or AAAA DNS records: " relay_dns_enter
              if [[ -z "${relay_dns_enter}" ]]; then
-               say "\n${FG_RED}ERROR${NC}: DNS record can not be empty!\n"
-               continue
-             fi
-             #ToDo - DNS format verficication?
-             read -r -p "Enter relays's port: " relay_port_enter
-             if [[ -n "${relay_port_enter}" ]]; then
-               if [[ ! "${relay_port_enter}" =~ ^[0-9]+$ || "${relay_port_enter}" -lt 1 || "${relay_port_enter}" -gt 65535 ]]; then
-                 say "\n${FG_RED}ERROR${NC}: invalid port number!\n"
-                 continue
-               fi
+               say "${FG_RED}ERROR${NC}: DNS record can not be empty!"
              else
-               say "\n${FG_RED}ERROR${NC}: Port can not be empty!\n"
-               continue
+               read -r -p "Enter relays's port: " relay_port_enter
+               if [[ -n "${relay_port_enter}" ]]; then
+                 if [[ ! "${relay_port_enter}" =~ ^[0-9]+$ || "${relay_port_enter}" -lt 1 || "${relay_port_enter}" -gt 65535 ]]; then
+                   say "${FG_RED}ERROR${NC}: invalid port number!"
+                 else
+                   relay_array+=( "type" "DNS_A" "address" "${relay_dns_enter}" "port" "${relay_port_enter}" )
+                   relay_output+="--single-host-pool-relay ${relay_dns_enter} --pool-relay-port ${relay_port_enter} "
+                 fi
+               else
+                 say "${FG_RED}ERROR${NC}: Port can not be empty!"
+               fi
              fi
-             relay_array+=( "type" "DNS_A" "address" "${relay_dns_enter}" "port" "${relay_port_enter}" )
-             relay_output+="--single-host-pool-relay ${relay_dns_enter} --pool-relay-port ${relay_port_enter} "
              ;;
-          1) echo && read -r -p "Enter relays's IPv4 address: " relay_ipv4_enter
+          1) read -r -p "Enter relays's IPv4 address: " relay_ipv4_enter
              if [[ -n "${relay_ipv4_enter}" ]]; then
                if ! validIP "${relay_ipv4_enter}"; then
-                 say "\n${FG_RED}ERROR${NC}: invalid IPv4 address format!\n"
-                 continue
+                 say "${FG_RED}ERROR${NC}: invalid IPv4 address format!"
+               else
+                 read -r -p "Enter relays's port: " relay_port_enter
+                 if [[ -n "${relay_port_enter}" ]]; then
+                   if [[ ! "${relay_port_enter}" =~ ^[0-9]+$ || "${relay_port_enter}" -lt 1 || "${relay_port_enter}" -gt 65535 ]]; then
+                     say "${FG_RED}ERROR${NC}: invalid port number!"
+                   else
+                     relay_array+=( "type" "IPv4" "address" "${relay_ipv4_enter}" "port" "${relay_port_enter}" )
+                     relay_output+="--pool-relay-port ${relay_port_enter} --pool-relay-ipv4 ${relay_ipv4_enter} "
+                   fi
+                 else
+                   say "${FG_RED}ERROR${NC}: Port can not be empty!"
+                 fi
                fi
              else
-               say "\n${FG_RED}ERROR${NC}: IPv4 address can not be empty!\n"
-               continue
+               say "${FG_RED}ERROR${NC}: IPv4 address can not be empty!"
              fi
-             read -r -p "Enter relays's port: " relay_port_enter
-             if [[ -n "${relay_port_enter}" ]]; then
-               if [[ ! "${relay_port_enter}" =~ ^[0-9]+$ || "${relay_port_enter}" -lt 1 || "${relay_port_enter}" -gt 65535 ]]; then
-                 say "\n${FG_RED}ERROR${NC}: invalid port number!\n"
-                 continue
-               fi
-             else
-               say "\n${FG_RED}ERROR${NC}: Port can not be empty!\n"
-               continue
-             fi
-             relay_array+=( "type" "IPv4" "address" "${relay_ipv4_enter}" "port" "${relay_port_enter}" )
-             relay_output+="--pool-relay-port ${relay_port_enter} --pool-relay-ipv4 ${relay_ipv4_enter} "
              ;;
           2) continue 2 ;;
         esac
-        say "\nAdd more relay entries?"
+        say "Add more relay entries?"
         select_opt "[n] No" "[y] Yes" "[Esc] Cancel"
         case $? in
           0) break ;;
@@ -1781,6 +1774,7 @@ EOF
     if ! isWalletRegistered ${owner_wallet}; then
       if [[ ${op_mode} = "online" ]]; then
         if ! registerStakeWallet ${owner_wallet}; then waitForInput && continue; fi
+        echo
       else
         say "Owner wallet not a registered wallet on chain and CNTools run in hybrid mode"
         say "Please first register all wallets to use in pool registration using 'Wallet >> Register'"
@@ -1818,6 +1812,7 @@ EOF
          ;;
       2) continue ;;
     esac
+    echo
 
     multi_owner_output=""
     multi_owner_skeys=()
@@ -1825,19 +1820,21 @@ EOF
     select_opt "[n] No" "[y] Yes" "[Esc] Cancel"
     case $? in
       0) : ;;
-      1) while true; do
-           say "\nEnter path to stake ${FG_CYAN}vkey${NC} file:"
-           fileDialog 0 "Enter path to stake vkey file" "${WALLET_FOLDER}"
-           say "${file}\n"
+      1) say "Enter path to ${FG_CYAN}${WALLET_STAKE_VK_FILENAME}${NC} & ${FG_CYAN}${WALLET_STAKE_SK_FILENAME}${NC} files in this order!"
+         waitForInput "Press any key to open the file explorer"
+         owner_count=1
+         while true; do
+           ((owner_count++))
+           fileDialog 0 "Enter path to ${WALLET_STAKE_VK_FILENAME} file" "${WALLET_FOLDER}/"
+           say "Owner #${owner_count} : vkey = ${file}"
            stake_vk_file_enter=${file}
            if [[ ${op_mode} = "online" ]]; then
-             say "Enter path to stake ${FG_CYAN}skey${NC} file:"
-             fileDialog 0 "Enter path to stake skey file" "${WALLET_FOLDER}"
-             say "${file}\n"
+             fileDialog 0 "Enter path to stake skey file" "${stake_vk_file_enter%/*}/${WALLET_STAKE_SK_FILENAME}"
+             say "Owner #${owner_count} : skey = ${file}"
              stake_sk_file_enter=${file}
              if [[ ! -f "${stake_vk_file_enter}" || ! -f "${stake_sk_file_enter}" ]]; then
                say "${FG_RED}ERROR${NC}: One or both files not found, please try again"
-               waitForInput && continue
+               ((owner_count--))
              else
                multi_owner_output+="--pool-owner-stake-verification-key-file ${stake_vk_file_enter} "
                multi_owner_skeys+=( "${stake_sk_file_enter}" )
@@ -1845,12 +1842,12 @@ EOF
            else
              if [[ ! -f "${stake_vk_file_enter}" ]]; then
                say "${FG_RED}ERROR${NC}: file not found, please try again"
-               waitForInput && continue
+               ((owner_count--))
              else
                multi_owner_output+="--pool-owner-stake-verification-key-file ${stake_vk_file_enter} "
              fi
            fi
-           say "\nAdd more owners?"
+           say "Add more owners?"
            select_opt "[n] No" "[y] Yes" "[Esc] Cancel"
            case $? in
              0) break ;;
@@ -1887,14 +1884,13 @@ EOF
     pool_regcert_file="${POOL_FOLDER}/${pool_name}/${POOL_REGCERT_FILENAME}"
     pool_deregcert_file="${POOL_FOLDER}/${pool_name}/${POOL_DEREGCERT_FILENAME}"
 
-    echo
-    say "# Register Stake Pool" "log"
+    say "\n# Register Stake Pool" 1 "log"
 
     if [[ ${op_mode} = "online" ]]; then
       getCurrentKESperiod
       echo "${current_kes_period}" > ${pool_saved_kes_start}
       say "creating operational certificate" 1 "log"
-      ${CCLI} shelley node issue-op-cert --kes-verification-key-file "${pool_hotkey_vk_file}" --cold-signing-key-file "${pool_coldkey_sk_file}" --operational-certificate-issue-counter-file "${pool_opcert_counter_file}" --kes-period "${current_kes_period}" --out-file "${pool_opcert_file}"
+      ${CCLI} node issue-op-cert --kes-verification-key-file "${pool_hotkey_vk_file}" --cold-signing-key-file "${pool_coldkey_sk_file}" --operational-certificate-issue-counter-file "${pool_opcert_counter_file}" --kes-period "${current_kes_period}" --out-file "${pool_opcert_file}"
     else
       say "\n${FG_YELLOW}Pool operational certificate not generated in hybrid mode,\nplease use 'Pool >> Rotate' in offline mode to generate new hot keys, op cert and KES start period and transfer to online node!${NC}" "log"
       say "${FG_CYAN}${pool_hotkey_vk_file}${NC}" "log"
@@ -1905,14 +1901,14 @@ EOF
     fi
 
     say "creating registration certificate" 1 "log"
-    say "$ ${CCLI} shelley stake-pool registration-certificate --cold-verification-key-file ${pool_coldkey_vk_file} --vrf-verification-key-file ${pool_vrf_vk_file} --pool-pledge ${pledge_lovelace} --pool-cost ${cost_lovelace} --pool-margin ${margin_fraction} --pool-reward-account-verification-key-file ${reward_stake_vk_file} --pool-owner-stake-verification-key-file ${owner_stake_vk_file} ${multi_owner_output} --out-file ${pool_regcert_file} ${NETWORK_IDENTIFIER} --metadata-url ${meta_json_url} --metadata-hash \$\(${CCLI} shelley stake-pool metadata-hash --pool-metadata-file ${pool_meta_file} \) ${relay_output}" 2
+    say "$ ${CCLI} stake-pool registration-certificate --cold-verification-key-file ${pool_coldkey_vk_file} --vrf-verification-key-file ${pool_vrf_vk_file} --pool-pledge ${pledge_lovelace} --pool-cost ${cost_lovelace} --pool-margin ${margin_fraction} --pool-reward-account-verification-key-file ${reward_stake_vk_file} --pool-owner-stake-verification-key-file ${owner_stake_vk_file} ${multi_owner_output} --out-file ${pool_regcert_file} ${NETWORK_IDENTIFIER} --metadata-url ${meta_json_url} --metadata-hash \$\(${CCLI} stake-pool metadata-hash --pool-metadata-file ${pool_meta_file} \) ${relay_output}" 2
     say "" 2
-    ${CCLI} shelley stake-pool registration-certificate --cold-verification-key-file "${pool_coldkey_vk_file}" --vrf-verification-key-file "${pool_vrf_vk_file}" --pool-pledge ${pledge_lovelace} --pool-cost ${cost_lovelace} --pool-margin ${margin_fraction} --pool-reward-account-verification-key-file "${reward_stake_vk_file}" --pool-owner-stake-verification-key-file "${owner_stake_vk_file}" ${multi_owner_output} --out-file "${pool_regcert_file}" ${NETWORK_IDENTIFIER} --metadata-url "${meta_json_url}" --metadata-hash "$(${CCLI} shelley stake-pool metadata-hash --pool-metadata-file ${pool_meta_file} )" ${relay_output}
+    ${CCLI} stake-pool registration-certificate --cold-verification-key-file "${pool_coldkey_vk_file}" --vrf-verification-key-file "${pool_vrf_vk_file}" --pool-pledge ${pledge_lovelace} --pool-cost ${cost_lovelace} --pool-margin ${margin_fraction} --pool-reward-account-verification-key-file "${reward_stake_vk_file}" --pool-owner-stake-verification-key-file "${owner_stake_vk_file}" ${multi_owner_output} --out-file "${pool_regcert_file}" ${NETWORK_IDENTIFIER} --metadata-url "${meta_json_url}" --metadata-hash "$(${CCLI} stake-pool metadata-hash --pool-metadata-file ${pool_meta_file} )" ${relay_output}
 
     say "creating delegation certificate for owner wallet" 1 "log"
-    say "$ ${CCLI} shelley stake-address delegation-certificate --stake-verification-key-file ${owner_stake_vk_file} --cold-verification-key-file ${pool_coldkey_vk_file} --out-file ${owner_delegation_cert_file}" 2
+    say "$ ${CCLI} stake-address delegation-certificate --stake-verification-key-file ${owner_stake_vk_file} --cold-verification-key-file ${pool_coldkey_vk_file} --out-file ${owner_delegation_cert_file}" 2
     say "" 2
-    ${CCLI} shelley stake-address delegation-certificate --stake-verification-key-file "${owner_stake_vk_file}" --cold-verification-key-file "${pool_coldkey_vk_file}" --out-file "${owner_delegation_cert_file}"
+    ${CCLI} stake-address delegation-certificate --stake-verification-key-file "${owner_stake_vk_file}" --cold-verification-key-file "${pool_coldkey_vk_file}" --out-file "${owner_delegation_cert_file}"
 
     delegate_reward_wallet="false"
     if [[ ! "${owner_wallet}" = "${reward_wallet}" ]]; then
@@ -1922,8 +1918,8 @@ EOF
         0) delegate_reward_wallet="true"
            say "" 1
            say "creating delegation certificate for reward wallet" 1 "log"
-           say "$ ${CCLI} shelley stake-address delegation-certificate --stake-verification-key-file ${reward_stake_vk_file} --cold-verification-key-file ${pool_coldkey_vk_file} --out-file ${reward_delegation_cert_file}" 2
-           ${CCLI} shelley stake-address delegation-certificate --stake-verification-key-file "${reward_stake_vk_file}" --cold-verification-key-file "${pool_coldkey_vk_file}" --out-file "${reward_delegation_cert_file}"
+           say "$ ${CCLI} stake-address delegation-certificate --stake-verification-key-file ${reward_stake_vk_file} --cold-verification-key-file ${pool_coldkey_vk_file} --out-file ${reward_delegation_cert_file}" 2
+           ${CCLI} stake-address delegation-certificate --stake-verification-key-file "${reward_stake_vk_file}" --cold-verification-key-file "${pool_coldkey_vk_file}" --out-file "${reward_delegation_cert_file}"
            ;;
         1) : ;;
       esac
@@ -1976,11 +1972,11 @@ EOF
     say "Owner  : ${FG_GREEN}${owner_wallet}${NC}" "log"
     [[ ${multi_owner_count} -gt 0 ]] && say "         ${FG_BLUE}${multi_owner_count}${NC} extra owner(s) using stake keys" "log"
     say "Reward : ${FG_GREEN}${reward_wallet}${NC}" "log"
-    say "Pledge : $(formatLovelace ${pledge_lovelace}) ADA" "log"
+    say "Pledge : $(formatAda ${pledge_ada}) ADA" "log"
     say "Margin : ${margin}%" "log"
-    say "Cost   : $(formatLovelace ${cost_lovelace}) ADA" "log"
+    say "Cost   : $(formatAda ${cost_ada}) ADA" "log"
     echo
-    say "Substitute value for POOL_NAME in $CNODE_HOME/scripts/cnode.sh with '${pool_name}'" "log"
+    say "Uncomment and set value for POOL_NAME in $CNODE_HOME/scripts/env with '${pool_name}'" "log"
     if [[ ${op_mode} = "online" && ${lovelace} -lt ${pledge_lovelace} ]]; then
       echo
       say "${FG_YELLOW}WARN${NC}: Balance in pledge wallet is less than set pool pledge"
@@ -2033,7 +2029,7 @@ EOF
     say "press enter to use old value\n"
 
     [[ -f ${pool_config} ]] && pledge_ada=$(jq -r '.pledgeADA //0' "${pool_config}") || pledge_ada=0
-    read -r -p "New Pledge (in ADA, old: ${pledge_ada}): " pledge_enter
+    read -r -p "New Pledge (in ADA, old: $(formatAda ${pledge_ada})): " pledge_enter
     pledge_enter="${pledge_enter//,}"
     if [[ -n "${pledge_enter}" ]]; then
       if ! ADAtoLovelace "${pledge_enter}" >/dev/null; then
@@ -2059,7 +2055,7 @@ EOF
 
     minPoolCost=$(( $(jq -r '.minPoolCost //0' "${TMP_FOLDER}"/protparams.json) / 1000000 )) # convert to ADA
     [[ -f ${pool_config} ]] && cost_ada=$(jq -r '.costADA //0' "${pool_config}") || cost_ada=0
-    read -r -p "New Cost (in ADA, minimum: ${minPoolCost}, old: ${cost_ada}): " cost_enter
+    read -r -p "New Cost (in ADA, minimum: ${minPoolCost}, old: $(formatAda ${cost_ada})): " cost_enter
     cost_enter="${cost_enter//,}"
     if [[ -n "${cost_enter}" ]]; then
       if ! ADAtoLovelace "${cost_enter}" >/dev/null; then
@@ -2180,7 +2176,7 @@ EOF
     # ToDo SRV & IPv6 support
     if [[ -f ${pool_config} && $(jq '.relays | length' "${pool_config}") -gt 0 ]]; then
       say "\nPrevious relay configuration:\n"
-      printTable ',' "$(say 'Type,Address,Port' | cat - <(jq -r -c '.relays[] | [.type //"-",.address //"-",.port //"-"] | @csv //empty' "${pool_config}") | tr -d '"')"
+      jq -r '["TYPE","ADDRESS","PORT"], (.relays[] | [.type //"-",.address //"-",.port //"-"]) | @tsv' "${pool_config}" | column -t
       say "\nReuse previous configuration?"
       select_opt "[y] Yes" "[n] No" "[Esc] Cancel"
       case $? in
@@ -2201,51 +2197,47 @@ EOF
       while true; do
         select_opt "[d] A or AAAA DNS record (single)" "[4] IPv4 address (multiple)" "[Esc] Cancel"
         case $? in
-          0) echo && read -r -p "Enter relays's DNS record, only A or AAAA DNS records: " relay_dns_enter
+          0) read -r -p "Enter relays's DNS record, only A or AAAA DNS records: " relay_dns_enter
              if [[ -z "${relay_dns_enter}" ]]; then
-               say "\n${FG_RED}ERROR${NC}: DNS record can not be empty!\n"
-               continue
-             fi
-             #ToDo - DNS format verficication?
-             read -r -p "Enter relays's port: " relay_port_enter
-             if [[ -n "${relay_port_enter}" ]]; then
-               if [[ ! "${relay_port_enter}" =~ ^[0-9]+$ || "${relay_port_enter}" -lt 1 || "${relay_port_enter}" -gt 65535 ]]; then
-                 say "\n${FG_RED}ERROR${NC}: invalid port number!\n"
-                 continue
-               fi
+               say "${FG_RED}ERROR${NC}: DNS record can not be empty!"
              else
-               say "\n${FG_RED}ERROR${NC}: Port can not be empty!\n"
-               continue
+               read -r -p "Enter relays's port: " relay_port_enter
+               if [[ -n "${relay_port_enter}" ]]; then
+                 if [[ ! "${relay_port_enter}" =~ ^[0-9]+$ || "${relay_port_enter}" -lt 1 || "${relay_port_enter}" -gt 65535 ]]; then
+                   say "${FG_RED}ERROR${NC}: invalid port number!"
+                 else
+                   relay_array+=( "type" "DNS_A" "address" "${relay_dns_enter}" "port" "${relay_port_enter}" )
+                   relay_output+="--single-host-pool-relay ${relay_dns_enter} --pool-relay-port ${relay_port_enter} "
+                 fi
+               else
+                 say "${FG_RED}ERROR${NC}: Port can not be empty!"
+               fi
              fi
-             relay_array+=( "type" "DNS_A" "address" "${relay_dns_enter}" "port" "${relay_port_enter}" )
-             relay_output+="--single-host-pool-relay ${relay_dns_enter} --pool-relay-port ${relay_port_enter} "
              ;;
-          1) echo && read -r -p "Enter relays's IPv4 address: " relay_ipv4_enter
+          1) read -r -p "Enter relays's IPv4 address: " relay_ipv4_enter
              if [[ -n "${relay_ipv4_enter}" ]]; then
                if ! validIP "${relay_ipv4_enter}"; then
-                 say "\n${FG_RED}ERROR${NC}: invalid IPv4 address format!\n"
-                 continue
+                 say "${FG_RED}ERROR${NC}: invalid IPv4 address format!"
+               else
+                 read -r -p "Enter relays's port: " relay_port_enter
+                 if [[ -n "${relay_port_enter}" ]]; then
+                   if [[ ! "${relay_port_enter}" =~ ^[0-9]+$ || "${relay_port_enter}" -lt 1 || "${relay_port_enter}" -gt 65535 ]]; then
+                     say "${FG_RED}ERROR${NC}: invalid port number!"
+                   else
+                     relay_array+=( "type" "IPv4" "address" "${relay_ipv4_enter}" "port" "${relay_port_enter}" )
+                     relay_output+="--pool-relay-port ${relay_port_enter} --pool-relay-ipv4 ${relay_ipv4_enter} "
+                   fi
+                 else
+                   say "${FG_RED}ERROR${NC}: Port can not be empty!"
+                 fi
                fi
              else
-               say "\n${FG_RED}ERROR${NC}: IPv4 address can not be empty!\n"
-               continue
+               say "${FG_RED}ERROR${NC}: IPv4 address can not be empty!"
              fi
-             read -r -p "Enter relays's port: " relay_port_enter
-             if [[ -n "${relay_port_enter}" ]]; then
-               if [[ ! "${relay_port_enter}" =~ ^[0-9]+$ || "${relay_port_enter}" -lt 1 || "${relay_port_enter}" -gt 65535 ]]; then
-                 say "\n${FG_RED}ERROR${NC}: invalid port number!\n"
-                 continue
-               fi
-             else
-               say "\n${FG_RED}ERROR${NC}: Port can not be empty!\n"
-               continue
-             fi
-             relay_array+=( "type" "IPv4" "address" "${relay_ipv4_enter}" "port" "${relay_port_enter}" )
-             relay_output+="--pool-relay-port ${relay_port_enter} --pool-relay-ipv4 ${relay_ipv4_enter} "
              ;;
           2) continue 2 ;;
         esac
-        say "\nAdd more relay entries?"
+        say "Add more relay entries?"
         select_opt "[n] No" "[y] Yes" "[Esc] Cancel"
         case $? in
           0) break ;;
@@ -2254,6 +2246,7 @@ EOF
         esac
       done
     fi
+    echo
 
     # Owner wallet, also used to pay for pool update fee
     if [[ -f ${pool_config} ]]; then
@@ -2292,6 +2285,7 @@ EOF
     if ! isWalletRegistered ${owner_wallet}; then
       if [[ ${op_mode} = "online" ]]; then
         if ! registerStakeWallet ${owner_wallet}; then waitForInput && continue; fi
+        echo
       else
         say "Owner wallet not a registered wallet on chain and CNTools run in hybrid mode"
         say "Please first register all wallets to use in pool registration using 'Wallet >> Register'"
@@ -2328,6 +2322,7 @@ EOF
          ;;
       2) continue ;;
     esac
+    echo
 
     multi_owner_output=""
     multi_owner_skeys=()
@@ -2335,19 +2330,21 @@ EOF
     select_opt "[n] No" "[y] Yes" "[Esc] Cancel"
     case $? in
       0) : ;;
-      1) while true; do
-           say "\nEnter path to stake ${FG_CYAN}vkey${NC} file:"
-           fileDialog 0 "Enter path to stake vkey file" "${WALLET_FOLDER}"
-           say "${file}\n"
+      1) say "Enter path to ${FG_CYAN}${WALLET_STAKE_VK_FILENAME}${NC} & ${FG_CYAN}${WALLET_STAKE_SK_FILENAME}${NC} files in this order!"
+         waitForInput "Press any key to open the file explorer"
+         owner_count=1
+         while true; do
+           ((owner_count++))
+           fileDialog 0 "Enter path to ${WALLET_STAKE_VK_FILENAME} file" "${WALLET_FOLDER}/"
+           say "Owner #${owner_count} : vkey = ${file}"
            stake_vk_file_enter=${file}
            if [[ ${op_mode} = "online" ]]; then
-             say "Enter path to stake ${FG_CYAN}skey${NC} file:"
-             fileDialog 0 "Enter path to stake skey file" "${WALLET_FOLDER}"
-             say "${file}\n"
+             fileDialog 0 "Enter path to stake skey file" "${stake_vk_file_enter%/*}/${WALLET_STAKE_SK_FILENAME}"
+             say "Owner #${owner_count} : skey = ${file}"
              stake_sk_file_enter=${file}
              if [[ ! -f "${stake_vk_file_enter}" || ! -f "${stake_sk_file_enter}" ]]; then
                say "${FG_RED}ERROR${NC}: One or both files not found, please try again"
-               waitForInput && continue
+               ((owner_count--))
              else
                multi_owner_output+="--pool-owner-stake-verification-key-file ${stake_vk_file_enter} "
                multi_owner_skeys+=( "${stake_sk_file_enter}" )
@@ -2355,12 +2352,12 @@ EOF
            else
              if [[ ! -f "${stake_vk_file_enter}" ]]; then
                say "${FG_RED}ERROR${NC}: file not found, please try again"
-               waitForInput && continue
+               ((owner_count--))
              else
                multi_owner_output+="--pool-owner-stake-verification-key-file ${stake_vk_file_enter} "
              fi
            fi
-           say "\nAdd more owners?"
+           say "Add more owners?"
            select_opt "[n] No" "[y] Yes" "[Esc] Cancel"
            case $? in
              0) break ;;
@@ -2393,13 +2390,12 @@ EOF
     # Make a backup of current reg cert
     cp -f "${pool_regcert_file}" "${pool_regcert_file}.tmp"
 
-    echo
-    say "# Modify Stake Pool" "log"
+    say "\n# Modify Stake Pool" 1 "log"
     
     say "creating registration certificate" 1 "log"
-    say "$ ${CCLI} shelley stake-pool registration-certificate --cold-verification-key-file ${pool_coldkey_vk_file} --vrf-verification-key-file ${pool_vrf_vk_file} --pool-pledge ${pledge_lovelace} --pool-cost ${cost_lovelace} --pool-margin ${margin_fraction} --pool-reward-account-verification-key-file ${reward_stake_vk_file} --pool-owner-stake-verification-key-file ${owner_stake_vk_file} ${multi_owner_output} --metadata-url ${meta_json_url} --metadata-hash \$\(${CCLI} shelley stake-pool metadata-hash --pool-metadata-file ${pool_meta_file} \) ${relay_output} ${NETWORK_IDENTIFIER} --out-file ${pool_regcert_file}" 2
+    say "$ ${CCLI} stake-pool registration-certificate --cold-verification-key-file ${pool_coldkey_vk_file} --vrf-verification-key-file ${pool_vrf_vk_file} --pool-pledge ${pledge_lovelace} --pool-cost ${cost_lovelace} --pool-margin ${margin_fraction} --pool-reward-account-verification-key-file ${reward_stake_vk_file} --pool-owner-stake-verification-key-file ${owner_stake_vk_file} ${multi_owner_output} --metadata-url ${meta_json_url} --metadata-hash \$\(${CCLI} stake-pool metadata-hash --pool-metadata-file ${pool_meta_file} \) ${relay_output} ${NETWORK_IDENTIFIER} --out-file ${pool_regcert_file}" 2
     say "" 2
-    ${CCLI} shelley stake-pool registration-certificate --cold-verification-key-file "${pool_coldkey_vk_file}" --vrf-verification-key-file "${pool_vrf_vk_file}" --pool-pledge ${pledge_lovelace} --pool-cost ${cost_lovelace} --pool-margin ${margin_fraction} --pool-reward-account-verification-key-file "${reward_stake_vk_file}" --pool-owner-stake-verification-key-file "${owner_stake_vk_file}" ${multi_owner_output} --metadata-url "${meta_json_url}" --metadata-hash "$(${CCLI} shelley stake-pool metadata-hash --pool-metadata-file ${pool_meta_file} )" ${relay_output} ${NETWORK_IDENTIFIER} --out-file "${pool_regcert_file}"
+    ${CCLI} stake-pool registration-certificate --cold-verification-key-file "${pool_coldkey_vk_file}" --vrf-verification-key-file "${pool_vrf_vk_file}" --pool-pledge ${pledge_lovelace} --pool-cost ${cost_lovelace} --pool-margin ${margin_fraction} --pool-reward-account-verification-key-file "${reward_stake_vk_file}" --pool-owner-stake-verification-key-file "${owner_stake_vk_file}" ${multi_owner_output} --metadata-url "${meta_json_url}" --metadata-hash "$(${CCLI} stake-pool metadata-hash --pool-metadata-file ${pool_meta_file} )" ${relay_output} ${NETWORK_IDENTIFIER} --out-file "${pool_regcert_file}"
 
     say "sending transaction to chain" 1 "log"
     if ! modifyPool "${pool_name}" "${reward_wallet}" "${owner_wallet}" "${multi_owner_skeys[@]}"; then
@@ -2443,9 +2439,9 @@ EOF
     say "Owner  : ${FG_GREEN}${owner_wallet}${NC}" "log"
     [[ ${multi_owner_count} -gt 0 ]] && say "         ${FG_BLUE}${multi_owner_count}${NC} extra owner(s) using stake keys" "log"
     say "Reward : ${FG_GREEN}${reward_wallet}${NC}" "log"
-    say "Pledge : $(formatLovelace ${pledge_lovelace}) ADA" "log"
+    say "Pledge : $(formatAda ${pledge_ada}) ADA" "log"
     say "Margin : ${margin}%" "log"
-    say "Cost   : $(formatLovelace ${cost_lovelace}) ADA" "log"
+    say "Cost   : $(formatAda ${cost_ada}) ADA" "log"
     if [[ ${op_mode} = "online" && ${lovelace} -lt ${pledge_lovelace} ]]; then
       echo
       say "${FG_YELLOW}WARN${NC}: Balance in pledge wallet is less than set pool pledge"
@@ -2559,8 +2555,8 @@ EOF
 
     say "" 1
     say "creating de-registration cert" 1 "log"
-    say "$ ${CCLI} shelley stake-pool deregistration-certificate --cold-verification-key-file ${pool_coldkey_vk_file} --epoch ${epoch_enter} --out-file ${pool_deregcert_file}" 2
-    ${CCLI} shelley stake-pool deregistration-certificate --cold-verification-key-file ${pool_coldkey_vk_file} --epoch ${epoch_enter} --out-file ${pool_deregcert_file}
+    say "$ ${CCLI} stake-pool deregistration-certificate --cold-verification-key-file ${pool_coldkey_vk_file} --epoch ${epoch_enter} --out-file ${pool_deregcert_file}" 2
+    ${CCLI} stake-pool deregistration-certificate --cold-verification-key-file ${pool_coldkey_vk_file} --epoch ${epoch_enter} --out-file ${pool_deregcert_file}
 
     if ! deRegisterPool "${pool_coldkey_sk_file}" "${pool_deregcert_file}" "${addr}" "${payment_sk_file}"; then
       waitForInput && continue
@@ -2653,7 +2649,7 @@ EOF
 
     if [[ ${CNTOOLS_MODE} = "CONNECTED" ]]; then
       tput sc && say "Dumping ledger-state from node, can take a while on larger networks...\n"
-      if ! timeout -k 5 $TIMEOUT_LEDGER_STATE ${CCLI} shelley query ledger-state ${PROTOCOL_IDENTIFIER} ${NETWORK_IDENTIFIER} --out-file "${TMP_FOLDER}"/ledger-state.json; then
+      if ! timeout -k 5 $TIMEOUT_LEDGER_STATE ${CCLI} query ledger-state ${ERA_IDENTIFIER} ${PROTOCOL_IDENTIFIER} ${NETWORK_IDENTIFIER} --out-file "${TMP_FOLDER}"/ledger-state.json; then
         tput rc && tput ed
         say "${FG_RED}ERROR${NC}: ledger dump failed/timed out"
         say "increase timeout value in cntools.config"
@@ -2662,18 +2658,21 @@ EOF
       tput rc && tput ed
     fi
 
-    echo
     getPoolID ${pool_name}
     if [[ ${CNTOOLS_MODE} = "OFFLINE" ]]; then
       [[ -f "${POOL_FOLDER}/${pool_name}/${POOL_REGCERT_FILENAME}" ]] && pool_registered="YES" || pool_registered="NO"
       [[ -f "${POOL_FOLDER}/${pool_name}/${POOL_DEREGCERT_FILENAME}" ]] && ledger_retiring="?" || ledger_retiring=""
     else
-      ledger_pParams=$(jq -r '.nesEs.esLState._delegationState._pstate._pParams."'"${pool_id}"'" // empty' "${TMP_FOLDER}"/ledger-state.json)
-      ledger_fPParams=$(jq -r '.nesEs.esLState._delegationState._pstate._fPParams."'"${pool_id}"'" // empty' "${TMP_FOLDER}"/ledger-state.json)
-      ledger_retiring=$(jq -r '.nesEs.esLState._delegationState._pstate._retiring."'"${pool_id}"'" // empty' "${TMP_FOLDER}"/ledger-state.json)
+      tput sc && say "Parsing ledger-state, can take a while on larger networks...\n"
+      ledger_pstate=$(jq -r '.nesEs.esLState._delegationState._pstate' "${TMP_FOLDER}"/ledger-state.json)
+      ledger_pParams=$(jq -r '._pParams."'"${pool_id}"'" // empty' <<< ${ledger_pstate})
+      ledger_fPParams=$(jq -r '._fPParams."'"${pool_id}"'" // empty' <<< ${ledger_pstate})
+      ledger_retiring=$(jq -r '._retiring."'"${pool_id}"'" // empty' <<< ${ledger_pstate})
       [[ -z "${ledger_fPParams}" ]] && ledger_fPParams="${ledger_pParams}"
       [[ -n "${ledger_pParams}" ]] && pool_registered="YES" || pool_registered="NO"
+      tput rc && tput ed
     fi
+    echo
     say "$(printf "%-21s : ${FG_GREEN}%s${NC}" "Pool" "${pool_name}")" "log"
     say "$(printf "%-21s : %s" "ID (hex)" "${pool_id}")" "log"
     [[ -n ${pool_id_bech32} ]] && say "$(printf "%-21s : %s" "ID (bech32)" "${pool_id_bech32}")" "log"
@@ -2693,7 +2692,7 @@ EOF
       say "$(printf "  %-19s : %s" "Description" "$(jq -r .description "${pool_meta_file}")")" "log"
       [[ -f "${pool_config}" ]] && meta_url="$(jq -r .json_url "${pool_config}")" || meta_url="---"
       say "$(printf "  %-19s : %s" "URL" "${meta_url}")" "log"
-      meta_hash="$(${CCLI} shelley stake-pool metadata-hash --pool-metadata-file "${pool_meta_file}" )"
+      meta_hash="$(${CCLI} stake-pool metadata-hash --pool-metadata-file "${pool_meta_file}" )"
       say "$(printf "  %-19s : %s" "Hash" "${meta_hash}")" "log"
     else
       if [[ -f "${pool_config}" ]]; then
@@ -2708,7 +2707,7 @@ EOF
         say "$(printf "  %-19s : %s" "Homepage" "$(jq -r .homepage "$TMP_FOLDER/url_poolmeta.json")")" "log"
         say "$(printf "  %-19s : %s" "Description" "$(jq -r .description "$TMP_FOLDER/url_poolmeta.json")")" "log"
         say "$(printf "  %-19s : %s" "URL" "${meta_json_url}")" "log"
-        meta_hash_url="$(${CCLI} shelley stake-pool metadata-hash --pool-metadata-file "$TMP_FOLDER/url_poolmeta.json" )"
+        meta_hash_url="$(${CCLI} stake-pool metadata-hash --pool-metadata-file "$TMP_FOLDER/url_poolmeta.json" )"
         meta_hash_pParams=$(jq -r '.metadata.hash //empty' <<< "${ledger_pParams}")
         meta_hash_fPParams=$(jq -r '.metadata.hash //empty' <<< "${ledger_fPParams}")
         say "$(printf "  %-19s : %s" "Hash URL" "${meta_hash_url}")" "log"
@@ -2732,9 +2731,9 @@ EOF
           conf_cost=$(( $(jq -r '.costADA //0' "${pool_config}") * 1000000 ))
           conf_owner=$(jq -r '.pledgeWallet //"unknown"' "${pool_config}")
           conf_reward=$(jq -r '.rewardWallet //"unknown"' "${pool_config}")
-          say "$(printf "%-21s : %s ADA" "Pledge" "$(formatLovelace "${conf_pledge}")")" "log"
+          say "$(printf "%-21s : %s ADA" "Pledge" "$(formatAda "${conf_pledge::-6}")")" "log"
           say "$(printf "%-21s : %s %%" "Margin" "${conf_margin}")" "log"
-          say "$(printf "%-21s : %s ADA" "Cost" "$(formatLovelace "${conf_cost}")")" "log"
+          say "$(printf "%-21s : %s ADA" "Cost" "$(formatAda "${conf_cost::-6}")")" "log"
           say "$(printf "%-21s : %s (%s)" "Owner Wallet" "${FG_GREEN}${conf_owner}${NC}" "primary only, use online mode for multi-owner")" "log"
           say "$(printf "%-21s : %s" "Reward Wallet" "${FG_GREEN}${conf_reward}${NC}")" "log"
           relay_title="Relay(s)"
@@ -2751,9 +2750,9 @@ EOF
         pParams_pledge=$(jq -r '.pledge //0' <<< "${ledger_pParams}")
         fPParams_pledge=$(jq -r '.pledge //0' <<< "${ledger_fPParams}")
         if [[ ${pParams_pledge} -eq ${fPParams_pledge} ]]; then
-          say "$(printf "%-21s : %s ADA" "Pledge" "$(formatLovelace "${pParams_pledge}")")" "log"
+          say "$(printf "%-21s : %s ADA" "Pledge" "$(formatAda "${pParams_pledge::-6}")")" "log"
         else
-          say "$(printf "%-15s (${FG_YELLOW}%s${NC}) : %s ADA" "Pledge" "new" "$(formatLovelace "${fPParams_pledge}")" )" "log"
+          say "$(printf "%-15s (${FG_YELLOW}%s${NC}) : %s ADA" "Pledge" "new" "$(formatAda "${fPParams_pledge::-6}")" )" "log"
         fi
         pParams_margin=$(LC_NUMERIC=C printf "%.4f" "$(jq -r '.margin //0' <<< "${ledger_pParams}")")
         fPParams_margin=$(LC_NUMERIC=C printf "%.4f" "$(jq -r '.margin //0' <<< "${ledger_fPParams}")")
@@ -2765,9 +2764,9 @@ EOF
         pParams_cost=$(jq -r '.cost //0' <<< "${ledger_pParams}")
         fPParams_cost=$(jq -r '.cost //0' <<< "${ledger_fPParams}")
         if [[ ${pParams_cost} -eq ${fPParams_cost} ]]; then
-          say "$(printf "%-21s : %s ADA" "Cost" "$(formatLovelace "${pParams_cost}")")" "log"
+          say "$(printf "%-21s : %s ADA" "Cost" "$(formatAda "${pParams_cost::-6}")")" "log"
         else
-          say "$(printf "%-15s (${FG_YELLOW}%s${NC}) : %s ADA" "Cost" "new" "$(formatLovelace "${fPParams_cost}")" )" "log"
+          say "$(printf "%-15s (${FG_YELLOW}%s${NC}) : %s ADA" "Cost" "new" "$(formatAda "${fPParams_cost::-6}")" )" "log"
         fi
         if [[ ! $(jq -c '.relays[] //empty' <<< "${ledger_pParams}") = $(jq -c '.relays[] //empty' <<< "${ledger_fPParams}") ]]; then
           say "$(printf "%-23s ${FG_YELLOW}%s${NC}" "" "Relay(s) updated, showing latest registered")" "log"
@@ -2818,7 +2817,7 @@ EOF
             say "$(printf "%-21s : %s" "Reward account" "${reward_account}")" "log"
           fi
         fi
-        stake_pct=$(fractionToPCT "$(LC_NUMERIC=C printf "%.10f" "$(${CCLI} shelley query stake-distribution ${PROTOCOL_IDENTIFIER} ${NETWORK_IDENTIFIER} | grep "${pool_id_bech32}" | tr -s ' ' | cut -d ' ' -f 2)")")
+        stake_pct=$(fractionToPCT "$(LC_NUMERIC=C printf "%.10f" "$(${CCLI} query stake-distribution ${ERA_IDENTIFIER} ${PROTOCOL_IDENTIFIER} ${NETWORK_IDENTIFIER} | grep "${pool_id_bech32}" | tr -s ' ' | cut -d ' ' -f 2)")")
         if validateDecimalNbr ${stake_pct}; then
           say "$(printf "%-21s : %s %%" "Stake distribution" "${stake_pct}")" "log"
         fi
@@ -2868,7 +2867,7 @@ EOF
     if [[ ${CNTOOLS_MODE} = "OFFLINE" ]]; then
       say "Copy updated files to pool node replacing existing files:" "log"
       say "${pool_hotkey_sk_file}" "log"
-      say "${pool_opcert_counter_file}" "log"
+      say "${pool_opcert_file}" "log"
       echo
     fi
     say "Restart your pool node for changes to take effect"
@@ -3002,7 +3001,8 @@ EOF
   say " >> SIGN TX" "log"
   say "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
   echo
-  say "Enter path for Tx file to sign:"
+  say "Enter path for Tx file to sign"
+  waitForInput "Press any key to open the file explorer"
   fileDialog 0 "Enter path for Tx file to sign"
   say "${FG_CYAN}${file}${NC}\n" "log"
   tx_raw=${file}
@@ -3014,18 +3014,19 @@ EOF
   
   say "# Sign the transaction with all keys needed"
   ofl_sign_keys=()
+  say "\nEnter path to signing key files"
+  waitForInput "Press any key to open the file explorer"
   while true; do
-    fileDialog 0 "Enter path to signing key file" "${WALLET_FOLDER}"
+    fileDialog 0 "Enter path to signing key file" "${WALLET_FOLDER}/"
     if [[ -z "${file}" ]]; then
       say "${FG_YELLOW}EMPTY${NC}: no file selected, how do you want to proceed?"
-      : # do nothing
     elif [[ ! -f "${file}" ]]; then
       say "${FG_RED}ERROR${NC}: file not found, please try again! [${file}]"
     else
       ofl_sign_keys+=( "${file}" )
       say "${FG_GREEN}${file}${NC} added!" "log"
     fi
-    say "\nAdd more keys?"
+    say "Add more keys?"
     select_opt "[n] No" "[y] Yes" "[Esc] Cancel"
     case $? in
       0) echo && break ;;
@@ -3055,9 +3056,11 @@ EOF
     waitForInput && continue
   fi
   echo
-  say "Please enter signed Tx file to submit:"
+  say "Please enter signed Tx file to submit"
+  waitForInput "Press any key to open the file explorer"
   fileDialog 0 "Please enter signed Tx file to submit"
-  say "${FG_CYAN}${file}${NC}\n" "log"
+  say "${FG_CYAN}${file}${NC}" "log"
+  echo
   [[ -z "${file}" ]] && continue
   if [[ ! -f "${file}" ]]; then
     say "${FG_RED}ERROR${NC}: file not found: ${file}"
@@ -3263,11 +3266,18 @@ EOF
          current_epoch=$(getEpoch)
          say "Current epoch: ${FG_CYAN}${current_epoch}${NC}\n"
          if [[ ${view} -eq 1 ]]; then
-           block_table="Epoch,Leader | Ideal | Luck,${FG_CYAN}Adopted${NC} | ${FG_GREEN}Confirmed${NC},${FG_RED}Missed${NC} | ${FG_RED}Ghosted${NC} | ${FG_RED}Stolen${NC} | ${FG_RED}Invalid${NC}\n"
-           
            [[ $(sqlite3 "${BLOCKLOG_DB}" "SELECT EXISTS(SELECT 1 FROM blocklog WHERE epoch=$((current_epoch+1)) LIMIT 1);" 2>/dev/null) -eq 1 ]] && ((current_epoch++))
            first_epoch=$(( current_epoch - epoch_enter ))
            [[ ${first_epoch} -lt 0 ]] && first_epoch=0
+           
+           ideal_len=$(sqlite3 "${BLOCKLOG_DB}" "SELECT LENGTH(epoch_slots_ideal) FROM epochdata WHERE epoch BETWEEN ${first_epoch} and ${current_epoch} ORDER BY LENGTH(epoch_slots_ideal) DESC LIMIT 1;")
+           [[ ${ideal_len} -lt 5 ]] && ideal_len=5
+           luck_len=$(sqlite3 "${BLOCKLOG_DB}" "SELECT LENGTH(max_performance) FROM epochdata WHERE epoch BETWEEN ${first_epoch} and ${current_epoch} ORDER BY LENGTH(max_performance) DESC LIMIT 1;")
+           [[ $((luck_len+1)) -le 4 ]] && luck_len=4 || luck_len=$((luck_len+1))
+           printf '|'; printf "%$((5+6+ideal_len+luck_len+7+9+6+7+6+7+27+2))s" | tr " " "="; printf '|\n'
+           printf "| %-5s | %-6s | %-${ideal_len}s | %-${luck_len}s | ${FG_CYAN}%-7s${NC} | ${FG_GREEN}%-9s${NC} | ${FG_RED}%-6s${NC} | ${FG_RED}%-7s${NC} | ${FG_RED}%-6s${NC} | ${FG_RED}%-7s${NC} |\n" "Epoch" "Leader" "Ideal" "Luck" "Adopted" "Confirmed" "Missed" "Ghosted" "Stolen" "Invalid"
+           printf '|'; printf "%$((5+6+ideal_len+luck_len+7+9+6+7+6+7+27+2))s" | tr " " "="; printf '|\n'
+           
            while [[ ${current_epoch} -gt ${first_epoch} ]]; do
              invalid_cnt=$(sqlite3 "${BLOCKLOG_DB}" "SELECT COUNT(*) FROM blocklog WHERE epoch=${current_epoch} AND status='invalid';" 2>/dev/null)
              missed_cnt=$(sqlite3 "${BLOCKLOG_DB}" "SELECT COUNT(*) FROM blocklog WHERE epoch=${current_epoch} AND status='missed';" 2>/dev/null)
@@ -3282,10 +3292,10 @@ EOF
              else
                epoch_stats[1]="${epoch_stats[1]}%"
              fi
-             block_table+="$(printf "%s,%-6s | %-5s | %s,%-7s | %s,%-6s | %-7s | %-6s | %s" "${current_epoch}" "${leader_cnt}" "${epoch_stats[0]}" "${epoch_stats[1]}" "${adopted_cnt}" "${confirmed_cnt}" "${missed_cnt}" "${ghosted_cnt}" "${stolen_cnt}" "${invalid_cnt}")\n"
+             printf "| %-5s | %-6s | %-${ideal_len}s | %-${luck_len}s | ${FG_CYAN}%-7s${NC} | ${FG_GREEN}%-9s${NC} | ${FG_RED}%-6s${NC} | ${FG_RED}%-7s${NC} | ${FG_RED}%-6s${NC} | ${FG_RED}%-7s${NC} |\n" "${current_epoch}" "${leader_cnt}" "${epoch_stats[0]}" "${epoch_stats[1]}" "${adopted_cnt}" "${confirmed_cnt}" "${missed_cnt}" "${ghosted_cnt}" "${stolen_cnt}" "${invalid_cnt}"
              ((current_epoch--))
            done
-           printTable ',' "$(echo -e "${block_table}")"
+           printf '|'; printf "%$((5+6+ideal_len+luck_len+7+9+6+7+6+7+27+2))s" | tr " " "="; printf '|\n'
          else
            say "Block Status:\n"
            say "Leader    - Scheduled to make block at this slot"
@@ -3341,41 +3351,64 @@ EOF
          else
            epoch_stats[1]="${epoch_stats[1]}%"
          fi
-         epoch_summary="Leader | Ideal | Luck,${FG_CYAN}Adopted${NC} | ${FG_GREEN}Confirmed${NC},${FG_RED}Missed${NC} | ${FG_RED}Ghosted${NC} | ${FG_RED}Stolen${NC} | ${FG_RED}Invalid${NC}\n"
-         epoch_summary+="$(printf "%-6s | %-5s | %s,%-7s | %s,%-6s | %-7s | %-6s | %s" "${leader_cnt}" "${epoch_stats[0]}" "${epoch_stats[1]}" "${adopted_cnt}" "${confirmed_cnt}" "${missed_cnt}" "${ghosted_cnt}" "${stolen_cnt}" "${invalid_cnt}")\n"
-         printTable ',' "$(echo -e "${epoch_summary}")"
+         [[ ${#epoch_stats[0]} -gt 5 ]] && ideal_len=${#epoch_stats[0]} || ideal_len=5
+         [[ ${#epoch_stats[1]} -gt 4 ]] && luck_len=${#epoch_stats[1]} || luck_len=4
+         printf '|'; printf "%$((6+ideal_len+luck_len+7+9+6+7+6+7+24+2))s" | tr " " "="; printf '|\n'
+         printf "| %-6s | %-${ideal_len}s | %-${luck_len}s | ${FG_CYAN}%-7s${NC} | ${FG_GREEN}%-9s${NC} | ${FG_RED}%-6s${NC} | ${FG_RED}%-7s${NC} | ${FG_RED}%-6s${NC} | ${FG_RED}%-7s${NC} |\n" "Leader" "Ideal" "Luck" "Adopted" "Confirmed" "Missed" "Ghosted" "Stolen" "Invalid"
+         printf '|'; printf "%$((6+ideal_len+luck_len+7+9+6+7+6+7+24+2))s" | tr " " "="; printf '|\n'
+         printf "| %-6s | %-${ideal_len}s | %-${luck_len}s | ${FG_CYAN}%-7s${NC} | ${FG_GREEN}%-9s${NC} | ${FG_RED}%-6s${NC} | ${FG_RED}%-7s${NC} | ${FG_RED}%-6s${NC} | ${FG_RED}%-7s${NC} |\n" "${leader_cnt}" "${epoch_stats[0]}" "${epoch_stats[1]}" "${adopted_cnt}" "${confirmed_cnt}" "${missed_cnt}" "${ghosted_cnt}" "${stolen_cnt}" "${invalid_cnt}"
+         printf '|'; printf "%$((6+ideal_len+luck_len+7+9+6+7+6+7+24+2))s" | tr " " "="; printf '|\n'
          echo
          # print block table
          block_cnt=1
+         status_len=$(sqlite3 "${BLOCKLOG_DB}" "SELECT LENGTH(status) FROM blocklog WHERE epoch=${epoch_enter} ORDER BY LENGTH(status) DESC LIMIT 1;")
+         [[ ${status_len} -lt 6 ]] && status_len=6
+         block_len=$(sqlite3 "${BLOCKLOG_DB}" "SELECT LENGTH(block) FROM blocklog WHERE epoch=${epoch_enter} ORDER BY LENGTH(slot) DESC LIMIT 1;")
+         [[ ${block_len} -lt 5 ]] && block_len=5
+         slot_len=$(sqlite3 "${BLOCKLOG_DB}" "SELECT LENGTH(slot) FROM blocklog WHERE epoch=${epoch_enter} ORDER BY LENGTH(slot) DESC LIMIT 1;")
+         [[ ${slot_len} -lt 4 ]] && slot_len=4
+         slot_in_epoch_len=$(sqlite3 "${BLOCKLOG_DB}" "SELECT LENGTH(slot_in_epoch) FROM blocklog WHERE epoch=${epoch_enter} ORDER BY LENGTH(slot_in_epoch) DESC LIMIT 1;")
+         [[ ${slot_in_epoch_len} -lt 11 ]] && slot_in_epoch_len=11
+         at_len=23
+         size_len=$(sqlite3 "${BLOCKLOG_DB}" "SELECT LENGTH(size) FROM blocklog WHERE epoch=${epoch_enter} ORDER BY LENGTH(size) DESC LIMIT 1;")
+         [[ ${size_len} -lt 4 ]] && size_len=4
+         hash_len=$(sqlite3 "${BLOCKLOG_DB}" "SELECT LENGTH(hash) FROM blocklog WHERE epoch=${epoch_enter} ORDER BY LENGTH(hash) DESC LIMIT 1;")
+         [[ ${hash_len} -lt 4 ]] && hash_len=4
          if [[ ${view} -eq 1 ]]; then
-           block_table="#,Status,Block,Slot | SlotInEpoch,Scheduled At\n"
+           printf '|'; printf "%$((${#leader_cnt}+status_len+block_len+slot_len+slot_in_epoch_len+at_len+17))s" | tr " " "="; printf '|\n'
+           printf "| %-${#leader_cnt}s | %-${status_len}s | %-${block_len}s | %-${slot_len}s | %-${slot_in_epoch_len}s | %-${at_len}s |\n" "#" "Status" "Block" "Slot" "SlotInEpoch" "Scheduled At"
+           printf '|'; printf "%$((${#leader_cnt}+status_len+block_len+slot_len+slot_in_epoch_len+at_len+17))s" | tr " " "="; printf '|\n'
            while IFS='|' read -r status block slot slot_in_epoch at; do
              at=$(TZ="${BLOCKLOG_TZ}" date '+%F %T %Z' --date="${at}")
              [[ ${block} -eq 0 ]] && block="-"
-             block_table+="${block_cnt},${status},${block},${slot} | ${slot_in_epoch},${at}\n"
+             printf "| %-${#leader_cnt}s | %-${status_len}s | %-${block_len}s | %-${slot_len}s | %-${slot_in_epoch_len}s | %-${at_len}s |\n" "${block_cnt}" "${status}" "${block}" "${slot}" "${slot_in_epoch}" "${at}"
              ((block_cnt++))
            done < <(sqlite3 "${BLOCKLOG_DB}" "SELECT status, block, slot, slot_in_epoch, at FROM blocklog WHERE epoch=${epoch_enter} ORDER BY slot;" 2>/dev/null)
-           printTable ',' "$(echo -e ${block_table})"
+           printf '|'; printf "%$((${#leader_cnt}+status_len+block_len+slot_len+slot_in_epoch_len+at_len+17))s" | tr " " "="; printf '|\n'
          elif [[ ${view} -eq 2 ]]; then
-           block_table="#,Status,Slot,Size,Hash\n"
+           printf '|'; printf "%$((${#leader_cnt}+status_len+slot_len+size_len+hash_len+14))s" | tr " " "="; printf '|\n'
+           printf "| %-${#leader_cnt}s | %-${status_len}s | %-${slot_len}s | %-${size_len}s | %-${hash_len}s |\n" "#" "Status" "Slot" "Size" "Hash"
+           printf '|'; printf "%$((${#leader_cnt}+status_len+slot_len+size_len+hash_len+14))s" | tr " " "="; printf '|\n'
            while IFS='|' read -r status slot size hash; do
              [[ ${size} -eq 0 ]] && size="-"
              [[ -z ${hash} ]] && hash="-"
-             block_table+="${block_cnt},${status},${slot},${size},${hash}\n"
+             printf "| %-${#leader_cnt}s | %-${status_len}s | %-${slot_len}s | %-${size_len}s | %-${hash_len}s |\n" "${block_cnt}" "${status}" "${slot}" "${size}" "${hash}"
              ((block_cnt++))
            done < <(sqlite3 "${BLOCKLOG_DB}" "SELECT status, slot, size, hash FROM blocklog WHERE epoch=${epoch_enter} ORDER BY slot;" 2>/dev/null)
-           printTable ',' "$(echo -e ${block_table})"
+           printf '|'; printf "%$((${#leader_cnt}+status_len+slot_len+size_len+hash_len+14))s" | tr " " "="; printf '|\n'
          elif [[ ${view} -eq 3 ]]; then
-           block_table="#,Status,Block,Slot | SlotInEpoch,Scheduled At,Size,Hash\n"
+           printf '|'; printf "%$((${#leader_cnt}+status_len+block_len+slot_len+slot_in_epoch_len+at_len+size_len+hash_len+23))s" | tr " " "="; printf '|\n'
+           printf "| %-${#leader_cnt}s | %-${status_len}s | %-${block_len}s | %-${slot_len}s | %-${slot_in_epoch_len}s | %-${at_len}s | %-${size_len}s | %-${hash_len}s |\n" "#" "Status" "Block" "Slot" "SlotInEpoch" "Scheduled At" "Size" "Hash"
+           printf '|'; printf "%$((${#leader_cnt}+status_len+block_len+slot_len+slot_in_epoch_len+at_len+size_len+hash_len+23))s" | tr " " "="; printf '|\n'
            while IFS='|' read -r status block slot slot_in_epoch at size hash; do
              at=$(TZ="${BLOCKLOG_TZ}" date '+%F %T %Z' --date="${at}")
              [[ ${block} -eq 0 ]] && block="-"
              [[ ${size} -eq 0 ]] && size="-"
              [[ -z ${hash} ]] && hash="-"
-             block_table+="${block_cnt},${status},${block},${slot} | ${slot_in_epoch},${at},${size},${hash}\n"
+             printf "| %-${#leader_cnt}s | %-${status_len}s | %-${block_len}s | %-${slot_len}s | %-${slot_in_epoch_len}s | %-${at_len}s | %-${size_len}s | %-${hash_len}s |\n" "${block_cnt}" "${status}" "${block}" "${slot}" "${slot_in_epoch}" "${at}" "${size}" "${hash}"
              ((block_cnt++))
            done < <(sqlite3 "${BLOCKLOG_DB}" "SELECT status, block, slot, slot_in_epoch, at, size, hash FROM blocklog WHERE epoch=${epoch_enter} ORDER BY slot;" 2>/dev/null)
-           printTable ',' "$(echo -e ${block_table})"
+           printf '|'; printf "%$((${#leader_cnt}+status_len+block_len+slot_len+slot_in_epoch_len+at_len+size_len+hash_len+23))s" | tr " " "="; printf '|\n'
          elif [[ ${view} -eq 4 ]]; then
            say "Block Status:\n"
            say "Leader    - Scheduled to make block at this slot"
@@ -3485,7 +3518,8 @@ EOF
   say "Backup or Restore?"
   select_opt "[b] Backup" "[r] Restore" "[Esc] Cancel"
   case $? in
-    0) say "\nSelect backup directory(created if non existent):"
+    0) say "\nSelect backup directory(created if non existent)"
+       waitForInput "Press any key to open the file explorer"
        dirDialog 0 "Select backup directory"
        [[ "${dir}" != */ ]] && backup_path="${dir}/" || backup_path="${dir}"
        say "${FG_GREEN}${backup_path}${NC}\n"
@@ -3597,7 +3631,8 @@ EOF
     1) say "\nBackups created contain absolute path to files and directories"
        say "Restoring a backup does not replace existing files"
        say "Please restore to a temporary directory and copy files to restore to appropriate folders\n"
-       say "Select file to restore:"
+       say "Select file to restore"
+       waitForInput "Press any key to open the file explorer"
        fileDialog 0 "Select backup file to restore"
        backup_file=${file}
        if [[ ! -f "${backup_file}" ]]; then
@@ -3605,7 +3640,8 @@ EOF
          waitForInput && continue
        fi
        say "${FG_GREEN}${backup_file}${NC}\n"
-       say "Select/enter restore directory(created if non existent):"
+       say "Select/enter restore directory(created if non existent)"
+       waitForInput "Press any key to open the file explorer"
        dirDialog 0 "Select restore directory"
        [[ "${dir}" != */ ]] && restore_path="${dir}/" || restore_path="${dir}"
        if [[ ! "${restore_path}" =~ ^/[-0-9A-Za-z_]+ ]]; then

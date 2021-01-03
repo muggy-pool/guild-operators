@@ -1,6 +1,29 @@
 #!/bin/bash
 # shellcheck disable=SC2086,SC1090
 
+unset CNODE_HOME
+
+##########################################
+# User Variables - Change as desired     #
+# command line flags override set values #
+##########################################
+
+#INTERACTIVE='N'        # Interactive mode (Default: silent mode)
+#NETWORK='mainnet'      # Connect to specified network instead of public network (Default: connect to public cardano network)
+#WANT_BUILD_DEPS='Y'    # Skip installing OS level dependencies (Default: will check and install any missing OS level prerequisites)
+#FORCE_OVERWRITE='N'    # Force overwrite of all files including normally saved user config sections in env, cnode.sh and gLiveView.sh
+                        # topology.json, config.json and genesis files normally saved will also be overwritten
+#LIBSODIUM_FORK='N'     # Use IOG fork of libsodium - Recommended as per IOG instructions (Default: system build)
+#INSTALL_CNCLI='N'      # Install/Upgrade and build CNCLI with RUST
+#CNODE_NAME='cnode'     # Alternate name for top level folder, non alpha-numeric chars will be replaced with underscore (Default: cnode)
+#CURL_TIMEOUT=60        # Maximum time in seconds that you allow the file download operation to take before aborting (Default: 60s)
+#UPDATE_CHECK='Y'       # Check if there is an updated version of prereqs.sh script to download
+#SUDO='Y'               # Used by docker builds to disable sudo, leave unchanged if unsure.
+
+######################################
+# Do NOT modify code below           #
+######################################
+
 get_input() {
   printf "%s (default: %s): " "$1" "$2" >&2; read -r answer
   if [ -z "$answer" ]; then echo "$2"; else echo "$answer"; fi
@@ -27,10 +50,12 @@ err_exit() {
   exit 1
 }
 
+versionCheck() { printf '%s\n%s' "${1//v/}" "${2//v/}" | sort -C -V; } #$1=available_version, $2=installed_version
+
 usage() {
   cat <<EOF >&2
 
-Usage: $(basename "$0") [-f] [-s] [-i] [-l] [-c] [-b <branch>] [-n <testnet|guild>] [-t <name>] [-m <seconds>]
+Usage: $(basename "$0") [-f] [-s] [-i] [-l] [-c] [-b <branch>] [-n <testnet|guild|launchpad>] [-t <name>] [-m <seconds>]
 Install pre-requisites for building cardano node and using CNTools
 
 -f    Force overwrite of all files including normally saved user config sections in env, cnode.sh and gLiveView.sh
@@ -41,24 +66,13 @@ Install pre-requisites for building cardano node and using CNTools
 -t    Alternate name for top level folder, non alpha-numeric chars will be replaced with underscore (Default: cnode)
 -m    Maximum time in seconds that you allow the file download operation to take before aborting (Default: 60s)
 -l    Use IOG fork of libsodium - Recommended as per IOG instructions (Default: system build)
--c    Install/Upgrade and build CNCLI with RUST - IOG fork of libsodium required
+-c    Install/Upgrade and build CNCLI with RUST
 -b    Use alternate branch of scripts to download - only recommended for testing/development (Default: master)
 -i    Interactive mode (Default: silent mode)
 
 EOF
   exit 1
 }
-
-# Initialize defaults
-unset CNODE_HOME
-INTERACTIVE='N'
-NETWORK='mainnet'
-WANT_BUILD_DEPS='Y'
-FORCE_OVERWRITE='N'
-LIBSODIUM_FORK='N'
-INSTALL_CNCLI='N'
-CNODE_NAME='cnode'
-CURL_TIMEOUT=60
 
 while getopts :in:sflct:m:b: opt; do
   case ${opt} in
@@ -76,6 +90,20 @@ while getopts :in:sflct:m:b: opt; do
 done
 shift $((OPTIND -1))
 
+[[ -z ${INTERACTIVE} ]] && INTERACTIVE='N'
+[[ -z ${NETWORK} ]] && NETWORK='mainnet'
+[[ -z ${WANT_BUILD_DEPS} ]] && WANT_BUILD_DEPS='Y'
+[[ -z ${FORCE_OVERWRITE} ]] && FORCE_OVERWRITE='N'
+[[ -z ${LIBSODIUM_FORK} ]] && LIBSODIUM_FORK='N'
+[[ -z ${INSTALL_CNCLI} ]] && INSTALL_CNCLI='N'
+[[ -z ${CNODE_NAME} ]] && CNODE_NAME='cnode'
+[[ -z ${INTERACTIVE} ]] && INTERACTIVE='N'
+[[ -z ${CURL_TIMEOUT} ]] && CURL_TIMEOUT=60
+[[ -z ${UPDATE_CHECK} ]] && UPDATE_CHECK='Y'
+[[ -z ${SUDO} ]] && SUDO='Y'
+[[ "${SUDO}" = 'Y' ]] && sudo="sudo" || sudo=""
+[[ "${SUDO}" = 'Y' && $(id -u) -eq 0 ]] && err_exit "Please run as non-root user."
+
 # For who runs the script within containers and running it as root.
 U_ID=$(id -u)
 G_ID=$(id -g)
@@ -84,26 +112,31 @@ dirs -c # clear dir stack
 CNODE_PATH="/opt/cardano"
 CNODE_HOME=${CNODE_PATH}/${CNODE_NAME}
 CNODE_VNAME=$(echo "$CNODE_NAME" | awk '{print toupper($0)}')
-if [[ -z "${BRANCH}" ]]; then
-  [[ -f "${CNODE_HOME}"/scripts/.env_branch ]] && BRANCH="$(cat ${CNODE_HOME}/scripts/.env_branch)" || BRANCH="master"
-fi
+[[ -z "${BRANCH}" ]] && BRANCH="master"
 
 REPO="https://github.com/cardano-community/guild-operators"
 REPO_RAW="https://raw.githubusercontent.com/cardano-community/guild-operators"
 URL_RAW="${REPO_RAW}/${BRANCH}"
 
-SUDO='Y';
-[[ "${SUDO}" = 'Y' ]] && sudo="sudo" || sudo=""
-[[ "${SUDO}" = 'Y' && $(id -u) -eq 0 ]] && err_exit "Please run as non-root user."
-
+# Check if prereqs.sh update is available
 PARENT="$(dirname $0)"
-if curl -s -m ${CURL_TIMEOUT} -o "${PARENT}"/prereqs.sh.tmp ${URL_RAW}/scripts/cnode-helper-scripts/prereqs.sh 2>/dev/null; then
-  if ! cmp --silent "${PARENT}"/prereqs.sh "${PARENT}"/prereqs.sh.tmp; then
-    if get_answer "A new version of prereqs script available, do you want to download the latest version?"; then
-      mv -f "${PARENT}"/prereqs.sh.tmp "${PARENT}"/prereqs.sh
-      chmod 755 "${PARENT}"/prereqs.sh
-      echo -e "Update applied successfully!\n\nPlease re-run the script again!"
-      exit
+if [[ ${UPDATE_CHECK} = 'Y' ]] && curl -s -m ${CURL_TIMEOUT} -o "${PARENT}"/prereqs.sh.tmp ${URL_RAW}/scripts/cnode-helper-scripts/prereqs.sh 2>/dev/null; then
+  TEMPL_CMD=$(awk '/^# Do NOT modify/,0' "${PARENT}"/prereqs.sh)
+  TEMPL2_CMD=$(awk '/^# Do NOT modify/,0' "${PARENT}"/prereqs.sh.tmp)
+  if [[ "$(echo ${TEMPL_CMD} | sha256sum)" != "$(echo ${TEMPL2_CMD} | sha256sum)" ]]; then
+    if get_answer "A new version of prereqs script is available, do you want to download the latest version?"; then
+      cp "${PARENT}"/prereqs.sh "${PARENT}/prereqs.sh_bkp$(date +%s)"
+      STATIC_CMD=$(awk '/#!/{x=1}/^# Do NOT modify/{exit} x' "${PARENT}"/prereqs.sh)
+      printf '%s\n%s\n' "$STATIC_CMD" "$TEMPL2_CMD" > "${PARENT}"/prereqs.sh.tmp
+      {
+        mv -f "${PARENT}"/prereqs.sh.tmp "${PARENT}"/prereqs.sh && \
+        chmod 755 "${PARENT}"/prereqs.sh && \
+        echo -e "\nUpdate applied successfully, please run prereqs again!\n" && \
+        exit 0; 
+      } || {
+        echo -e "Update failed!\n\nPlease manually download latest version of prereqs.sh script from GitHub" && \
+        exit 1;
+      }
     fi
   fi
 fi
@@ -138,7 +171,7 @@ if [ "$WANT_BUILD_DEPS" = 'Y' ]; then
     $sudo apt-get -y install curl > /dev/null
     $sudo apt-get -y update > /dev/null
     echo "  Installing missing prerequisite packages, if any.."
-    pkg_list="libpq-dev python3 build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev systemd libsystemd-dev libsodium-dev zlib1g-dev make g++ tmux git jq libncursesw5 gnupg aptitude libtool autoconf secure-delete iproute2 bc tcptraceroute dialog sqlite libsqlite3-dev"
+    pkg_list="libpq-dev python3 build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev systemd libsystemd-dev libsodium-dev zlib1g-dev make g++ tmux git jq libncursesw5 gnupg aptitude libtool autoconf secure-delete iproute2 bc tcptraceroute dialog sqlite automake sqlite3 bsdmainutils"
     $sudo apt-get -y install ${pkg_list} > /dev/null;rc=$?
     if [ $rc != 0 ]; then
       echo "An error occurred while installing the prerequisite packages, please investigate by using the command below:"
@@ -153,7 +186,7 @@ if [ "$WANT_BUILD_DEPS" = 'Y' ]; then
     $sudo yum -y install curl > /dev/null
     $sudo yum -y update > /dev/null
     echo "  Installing missing prerequisite packages, if any.."
-    pkg_list="python3 coreutils pkgconfig libffi-devel gmp-devel openssl-devel ncurses-libs ncurses-compat-libs systemd systemd-devel libsodium-devel zlib-devel make gcc-c++ tmux git jq gnupg libtool autoconf srm iproute bc tcptraceroute dialog sqlite libsqlite3x-devel"
+    pkg_list="python3 coreutils pkgconfig libffi-devel gmp-devel openssl-devel ncurses-libs ncurses-compat-libs systemd systemd-devel libsodium-devel zlib-devel make gcc-c++ tmux git jq gnupg libtool autoconf srm iproute bc tcptraceroute dialog sqlite util-linux xz"
     [[ ! "${DISTRO}" =~ Fedora ]] && $sudo yum -y install epel-release > /dev/null
     $sudo yum -y install ${pkg_list} > /dev/null;rc=$?
     if [ $rc != 0 ]; then
@@ -168,6 +201,17 @@ if [ "$WANT_BUILD_DEPS" = 'Y' ]; then
       echo "  Updating symlinks for ncurse libs.."
       $sudo ln -s "$(find /usr/lib64/libtinfo.so* | tail -1)" /usr/lib64/libtinfo.so
       $sudo ln -s "$(find /usr/lib64/libtinfo.so* | tail -1)" /usr/lib64/libtinfo.so.5
+    fi
+  elif [[ $(uname) == Darwin ]]; then
+    echo "MacOS detected";
+    pkg_list="coreutils gnupg jq libsodium tcptraceroute"
+    brew install "${pkg_list}" > /dev/null;rc=$?
+
+    if [ $rc != 0 ]; then
+      echo "An error occurred while installing the prerequisite packages, please investigate by using the command below:"
+      echo "brew install ${pkg_list}"
+      echo "It would be best if you could submit an issue at ${REPO} with the details to tackle in future, as some errors may be due to external/already present dependencies"
+      err_exit
     fi
   else
     echo "We have no automated procedures for this ${DISTRO} system"
@@ -229,20 +273,19 @@ if [[ "${LIBSODIUM_FORK}" = "Y" ]]; then
 fi
 
 if [[ "${INSTALL_CNCLI}" = "Y" ]]; then
-  [[ ! -f /usr/local/lib/libsodium.so ]] && err_exit "IOG fork of libsodium is a pre-requisite for CNCLI, run '$(basename "$0") -h' to list available options"
-  if command -v cncli >/dev/null; then cncli_version="$(cncli -V | cut -d' ' -f2)"; else cncli_version=""; fi
+  if command -v cncli >/dev/null; then cncli_version="$(cncli -V | cut -d' ' -f2)"; else cncli_version="v0.0.0"; fi
   pushd "${HOME}"/git >/dev/null || err_exit
   if [[ -d ./cncli ]]; then
     echo "previous CNCLI installation found, pulling latest version from GitHub..."
     pushd ./cncli >/dev/null || err_exit
-    if ! output=$(git pull 2>&1); then echo -e "${output}" && err_exit; fi
+    if ! output=$(git fetch 2>&1); then echo -e "${output}" && err_exit; fi
   else
     echo "downloading CNCLI..."
     if ! output=$(git clone https://github.com/AndrewWestberg/cncli.git 2>&1); then echo -e "${output}" && err_exit; fi
     pushd ./cncli >/dev/null || err_exit
   fi
-  cncli_git_version=$(grep ^version Cargo.toml | cut -d'"' -f2)
-  if [[ "${cncli_version}" != "${cncli_git_version}" ]]; then
+  cncli_git_latestTag=$(git tag 2>/dev/null | tail -n 1)
+  if ! versionCheck "${cncli_git_latestTag}" "${cncli_version}"; then
     # install rust if not available
     if ! command -v "rustup" &>/dev/null; then
       echo "installing RUST..."
@@ -252,10 +295,12 @@ if [[ "${INSTALL_CNCLI}" = "Y" ]]; then
       rustup update &>/dev/null #ignore any errors, not crucial that update succeed
     fi
     . "${HOME}"/.profile # source profile to load ${HOME}/.cargo/bin into PATH
+    git checkout --quiet ${cncli_git_latestTag}
+    echo "building CNCLI..."
     if ! output=$(cargo install --path . --force 2>&1); then echo -e "${output}" && err_exit; fi
     echo "$(cncli -V) installed!"
   else
-    echo "CNCLI already latest version [${cncli_version}], skipping!"
+    echo "CNCLI already latest version [$(cncli -V | cut -d' ' -f2)], skipping!"
   fi
 fi
 
@@ -278,6 +323,11 @@ if [[ ${NETWORK} = "testnet" ]]; then
   curl -sL -m ${CURL_TIMEOUT} -o genesis.json.tmp https://hydra.iohk.io/job/Cardano/iohk-nix/cardano-deployment/latest-finished/download/1/testnet-shelley-genesis.json
   curl -sL -m ${CURL_TIMEOUT} -o topology.json.tmp https://hydra.iohk.io/job/Cardano/iohk-nix/cardano-deployment/latest-finished/download/1/testnet-topology.json
   curl -s -m ${CURL_TIMEOUT} -o config.json.tmp ${URL_RAW}/files/config-combinator.json
+elif [[ ${NETWORK} = "launchpad" ]]; then
+  curl -sL -m ${CURL_TIMEOUT} -o byron-genesis.json.tmp https://hydra.iohk.io/job/Cardano/iohk-nix/cardano-deployment/latest-finished/download/1/launchpad-byron-genesis.json
+  curl -sL -m ${CURL_TIMEOUT} -o genesis.json.tmp https://hydra.iohk.io/job/Cardano/iohk-nix/cardano-deployment/latest-finished/download/1/launchpad-shelley-genesis.json
+  curl -sL -m ${CURL_TIMEOUT} -o topology.json.tmp https://hydra.iohk.io/job/Cardano/iohk-nix/cardano-deployment/latest-finished/download/1/launchpad-topology.json
+  curl -s -m ${CURL_TIMEOUT} -o config.json.tmp ${URL_RAW}/files/config-launchpad.json
 elif [[ ${NETWORK} = "guild" ]]; then
   curl -s -m ${CURL_TIMEOUT} -o byron-genesis.json.tmp ${URL_RAW}/files/byron-genesis.json
   curl -s -m ${CURL_TIMEOUT} -o genesis.json.tmp ${URL_RAW}/files/genesis.json

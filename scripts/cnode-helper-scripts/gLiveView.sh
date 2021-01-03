@@ -50,7 +50,7 @@ setTheme() {
 # Do NOT modify code below           #
 ######################################
 
-GLV_VERSION=v1.13
+GLV_VERSION=v1.17
 
 PARENT="$(dirname $0)"
 [[ -f "${PARENT}"/.env_branch ]] && BRANCH="$(cat ${PARENT}/.env_branch)" || BRANCH="master"
@@ -130,9 +130,15 @@ myExit() {
   cleanup "$1"
 }
 
-if ! command -v "ss" &>/dev/null; then
-  myExit 1 "'ss' command missing, please install using latest prereqs.sh script or with your packet manager of choice.\nhttps://command-not-found.com/ss can be used to check package name to install."
-elif ! command -v "tcptraceroute" &>/dev/null; then
+if command -v "ss" &>/dev/null; then 
+  use_lsof='N'
+elif command -v "lsof" &>/dev/null; then 
+  use_lsof='Y'
+else
+  myExit 1 "'ss' and fallback 'lsof' commands missing, please install using latest prereqs.sh script or with your packet manager of choice.\nhttps://command-not-found.com/ss can be used to check package name to install."
+fi
+
+if ! command -v "tcptraceroute" &>/dev/null; then
   myExit 1 "'tcptraceroute' command missing, please install using latest prereqs.sh script or with your packet manager of choice.\nhttps://command-not-found.com/tcptraceroute can be used to check package name to install."
 fi
 
@@ -165,8 +171,6 @@ else
   echo -e "\nFailed to download gLiveView.sh from GitHub, unable to perform version check!\n"
   read -r -n 1 -s -p "press any key to proceed" answer
 fi
-
-[[ $(cardano-node version | head -1 | awk '{print $2}' | tr -d '.') -lt 1230 ]] && echo -e "\nERROR!! gLiveView has now been upgraded to support cardano-node 1.23 or higher. Please update cardano-node or use node-1.21 branch for gLiveView\n\n" && exit 1
 
 #######################################################
 # Validate config variables                           #
@@ -342,6 +346,26 @@ timeUntilNextEpoch() {
   fi
 }
 
+# Command    : sizeOfProgressSlotSpan
+# Description: Determine and set the size and style of the progress bar based on remaining time
+# Return     : sets leader_bar_span as integer [432000, 43200, 3600, 300]
+#            : sets leader_bar_style using styling from theme
+setSizeAndStyleOfProgressBar() {
+  if [[ ${1} -gt 43200 ]]; then
+    leader_bar_span=432000
+    leader_bar_style="${style_status_1}"
+  elif [[ ${1} -gt 3600 ]]; then
+    leader_bar_span=43200
+    leader_bar_style="${style_status_2}"
+  elif [[ ${1} -gt 300 ]]; then
+    leader_bar_span=3600
+    leader_bar_style="${style_status_3}"
+  else
+    leader_bar_span=300
+    leader_bar_style="${style_status_4}"
+  fi
+}
+
 # Command    : getSlotTipRef
 # Description: Get calculated slot number tip
 getSlotTipRef() {
@@ -370,7 +394,7 @@ kesExpiration() {
   current_time_sec=$(date -u +%s)
   tip_ref=$(getSlotTipRef)
   expiration_time_sec=$(( current_time_sec - ( SLOT_LENGTH * (tip_ref % SLOTS_PER_KES_PERIOD) ) + ( SLOT_LENGTH * SLOTS_PER_KES_PERIOD * remaining_kes_periods ) ))
-  kes_expiration=$(date '+%F %T Z' --date=@${expiration_time_sec})
+  kes_expiration=$(date '+%F %T %Z' --date=@${expiration_time_sec})
 }
 
 # Command    : slotInterval
@@ -393,14 +417,23 @@ checkPeers() {
   direction=$1
 
   if [[ ${direction} = "out" ]]; then
-    netstatPeers=$(ss -tnp state established 2>/dev/null | grep "${CNODE_PID}," | awk -v port=":(${CNODE_PORT}|${EKG_PORT}|${prom_port})" '$3 !~ port {print $4}')
+    if [[ ${use_lsof} = 'Y' ]]; then
+      peers=$(lsof -Pnl +M -i4 | grep ESTABLISHED | awk -v pid="${CNODE_PID}" -v port=":(${CNODE_PORT}|${EKG_PORT}|${prom_port})->" '$2 == pid && $9 !~ port {print $9}' | awk -F "->" '{print $2}')
+    else
+      peers=$(ss -tnp state established 2>/dev/null | grep "${CNODE_PID}," | awk -v port=":(${CNODE_PORT}|${EKG_PORT}|${prom_port})" '$3 !~ port {print $4}')
+    fi
   else
-    netstatPeers=$(ss -tnp state established 2>/dev/null | grep "${CNODE_PID}," | awk -v port=":${CNODE_PORT}" '$3 ~ port {print $4}')
+    if [[ ${use_lsof} = 'Y' ]]; then
+      peers=$(lsof -Pnl +M -i4 | grep ESTABLISHED | awk -v pid="${CNODE_PID}" -v port=":${CNODE_PORT}->" '$2 == pid && $9 ~ port {print $9}' | awk -F "->" '{print $2}')
+    else
+      cncli_port=$(ss -tnp state established "( dport = :${CNODE_PORT} )" 2>/dev/null | grep cncli | awk '{print $3}' | cut -d: -f2)
+      peers=$(ss -tnp state established 2>/dev/null | grep "${CNODE_PID}," | grep -v ":${cncli_port} " | awk -v port=":${CNODE_PORT}" '$3 ~ port {print $4}')
+    fi
   fi
-  [[ -z ${netstatPeers} ]] && return
+  [[ -z ${peers} ]] && return
   
-  netstatSorted=$(printf '%s\n' "${netstatPeers[@]}" | sort)
-  peerCNT=$(wc -w <<< "${netstatPeers}")
+  netstatSorted=$(printf '%s\n' "${peers[@]}" | sort)
+  peerCNT=$(wc -w <<< "${peers}")
   
   # Ping every node in the list
   lastpeerIP=""
@@ -520,12 +553,12 @@ while true; do
   line=0; tput cup 0 0 # reset position
 
   # Gather some data
+  CNODE_PID=$(pgrep -fn "[c]ardano-node*.*--port ${CNODE_PORT}")
   version=$("$(command -v cardano-node)" version)
   node_version=$(grep "cardano-node" <<< "${version}" | cut -d ' ' -f2)
   node_rev=$(grep "git rev" <<< "${version}" | cut -d ' ' -f3 | cut -c1-8)
   data=$(curl -s -m ${EKG_TIMEOUT} -H 'Accept: application/json' "http://${EKG_HOST}:${EKG_PORT}/" 2>/dev/null)
   uptimens=$(jq '.rts.gc.wall_ms.val //0' <<< "${data}")
-  #uptimens=$(jq '.cardano.node.metrics.upTime.ns.val //0' <<< "${data}")
   [[ ${fail_count} -eq ${RETRIES} ]] && myExit 1 "${style_status_3}COULD NOT CONNECT TO A RUNNING INSTANCE, ${RETRIES} FAILED ATTEMPTS IN A ROW!${NC}"
   if [[ ${uptimens} -le 0 ]]; then
     ((fail_count++))
@@ -536,8 +569,14 @@ while true; do
     fail_count=0
   fi
   if [[ ${show_peers} = "false" ]]; then
-    peers_in=$(ss -tnp state established 2>/dev/null | grep "${CNODE_PID}," | awk -v port=":${CNODE_PORT}" '$3 ~ port {print}' | wc -l)
-    peers_out=$(ss -tnp state established 2>/dev/null | grep "${CNODE_PID}," | awk -v port=":(${CNODE_PORT}|${EKG_PORT}|${prom_port})" '$3 !~ port {print}' | wc -l)
+    if [[ ${use_lsof} = 'Y' ]]; then
+      peers_in=$(lsof -Pnl +M -i4 | grep ESTABLISHED | awk -v pid="${CNODE_PID}" -v port=":${CNODE_PORT}->" '$2 == pid && $9 ~ port {print $9}' | awk -F "->" '{print $2}' | wc -l)
+      peers_out=$(lsof -Pnl +M -i4 | grep ESTABLISHED | awk -v pid="${CNODE_PID}" -v port=":(${CNODE_PORT}|${EKG_PORT}|${prom_port})->" '$2 == pid && $9 !~ port {print $9}' | awk -F "->" '{print $2}' | wc -l)
+    else
+      cncli_port=$(ss -tnp state established "( dport = :${CNODE_PORT} )" 2>/dev/null | grep cncli | awk '{print $3}' | cut -d: -f2)
+      peers_in=$(ss -tnp state established 2>/dev/null | grep "${CNODE_PID}," | grep -v ":${cncli_port} " | awk -v port=":${CNODE_PORT}" '$3 ~ port {print}' | wc -l)
+      peers_out=$(ss -tnp state established 2>/dev/null | grep "${CNODE_PID}," | awk -v port=":(${CNODE_PORT}|${EKG_PORT}|${prom_port})" '$3 !~ port {print}' | wc -l)
+    fi
     blocknum=$(jq '.cardano.node.ChainDB.metrics.blockNum.int.val //0' <<< "${data}")
     epochnum=$(jq '.cardano.node.ChainDB.metrics.epoch.int.val //0' <<< "${data}")
     slot_in_epoch=$(jq '.cardano.node.ChainDB.metrics.slotInEpoch.int.val //0' <<< "${data}")
@@ -567,7 +606,8 @@ while true; do
     fi
     if [[ ${curr_epoch} -ne ${epochnum} ]]; then # only update on new epoch to save on processing
       curr_epoch=${epochnum}
-      PROT_PARAMS="$(${CCLI} shelley query protocol-parameters ${PROTOCOL_IDENTIFIER} ${NETWORK_IDENTIFIER} 2>/dev/null)"
+      getEraIdentifier
+      PROT_PARAMS="$(${CCLI} query protocol-parameters ${ERA_IDENTIFIER} ${PROTOCOL_IDENTIFIER} ${NETWORK_IDENTIFIER} 2>/dev/null)"
       if [[ -n "${PROT_PARAMS}" ]] && ! DECENTRALISATION=$(jq -re .decentralisationParam <<< ${PROT_PARAMS} 2>/dev/null); then DECENTRALISATION=0.5; fi
     fi
   fi
@@ -804,9 +844,13 @@ while true; do
     printf "${VL} to the expire date the values will change color." && tput cup ${line} ${width} && printf "${VL}\n" && ((line++))
     echo "${blank_line}" && ((line++))
     printf "${VL} If CNCLI is activated to calculate and store node blocks," && tput cup ${line} ${width} && printf "${VL}\n" && ((line++))
-    printf "${VL} data from this blocklog DB is displayed. If not, blocks" && tput cup ${line} ${width} && printf "${VL}\n" && ((line++))
-    printf "${VL} created is taken from EKG metrics. Invalid, Missed, Ghosted" && tput cup ${line} ${width} && printf "${VL}\n" && ((line++))
-    printf "${VL} and Stolen only showed if non-zero for the epoch." && tput cup ${line} ${width} && printf "${VL}\n" && ((line++))
+    printf "${VL} data from this blocklog DB is displayed, which includes a" && tput cup ${line} ${width} && printf "${VL}\n" && ((line++))
+    printf "${VL} timer and progress bar counting down until next slot leader. " && tput cup ${line} ${width} && printf "${VL}\n" && ((line++))
+    printf "${VL} The progress bar color indicates the time range. Green is" && tput cup ${line} ${width} && printf "${VL}\n" && ((line++))
+    printf "${VL} 1 epoch, Tan is 1 day, red is 1 Hour, Magenta is 5 minutes." && tput cup ${line} ${width} && printf "${VL}\n" && ((line++))
+    printf "${VL} If CNCLI is not activated blocks created is taken from EKG" && tput cup ${line} ${width} && printf "${VL}\n" && ((line++))
+    printf "${VL} metrics. Invalid, Missed, Ghosted and Stolen only showed" && tput cup ${line} ${width} && printf "${VL}\n" && ((line++))
+    printf "${VL} if non-zero for the epoch." && tput cup ${line} ${width} && printf "${VL}\n" && ((line++))
     echo "${blank_line}" && ((line++))
     printf "${VL} - Leader    : scheduled to make block at this slot" && tput cup ${line} ${width} && printf "${VL}\n" && ((line++))
     printf "${VL} - Ideal     : Expected/Ideal number of blocks assigned" && tput cup ${line} ${width} && printf "${VL}\n" && ((line++))
@@ -905,6 +949,7 @@ while true; do
         confirmed_cnt=$(sqlite3 "${BLOCKLOG_DB}" "SELECT COUNT(*) FROM blocklog WHERE epoch=${epochnum} AND status='confirmed';" 2>/dev/null)
         adopted_cnt=$(( $(sqlite3 "${BLOCKLOG_DB}" "SELECT COUNT(*) FROM blocklog WHERE epoch=${epochnum} AND status='adopted';" 2>/dev/null) + confirmed_cnt ))
         leader_cnt=$(( $(sqlite3 "${BLOCKLOG_DB}" "SELECT COUNT(*) FROM blocklog WHERE epoch=${epochnum} AND status='leader';" 2>/dev/null) + adopted_cnt + invalid_cnt + missed_cnt + ghosted_cnt + stolen_cnt ))
+        leader_next=$(sqlite3 "${BLOCKLOG_DB}" "SELECT at FROM blocklog WHERE datetime(at) > datetime('now') ORDER BY slot ASC LIMIT 1;" 2>/dev/null)
         OLDIFS=$IFS && IFS='|' && read -ra epoch_stats <<< "$(sqlite3 "${BLOCKLOG_DB}" "SELECT epoch_slots_ideal, max_performance FROM epochdata WHERE epoch=${epochnum};" 2>/dev/null)" && IFS=$OLDIFS
         if [[ ${#epoch_stats[@]} -eq 0 ]]; then epoch_stats=("-" "-"); else epoch_stats[1]="${epoch_stats[1]}%"; fi
 
@@ -915,14 +960,29 @@ while true; do
         [[ ${adopted_cnt} -eq 0 ]] && adopted_fmt="${NC}" || adopted_fmt="${style_values_1}"
         if [[ ${confirmed_cnt} -eq 0 ]]; then confirmed_fmt="${NC}"; else [[ ${confirmed_cnt} -eq ${adopted_cnt} ]] && confirmed_fmt="${style_status_1}" || confirmed_fmt="${style_status_2}"; fi
         [[ ${leader_cnt} -eq 0 ]] && leader_fmt="${NC}" || leader_fmt="${style_values_1}"
-        
-        printf "${VL}${STANDOUT} BLOCKS ${NC}  Leader | Ideal | Luck       Adopted | Confirmed%$((width-58))s${VL}\n" "" && ((line++))
-        printf "${VL}%10s${leader_fmt}%-9s%-8s%-11s${adopted_fmt}%-10s${confirmed_fmt}%-9s${NC}%$((width-58))s${VL}\n" "" "${leader_cnt}" "${epoch_stats[0]}" "${epoch_stats[1]}" "${adopted_cnt}" "${confirmed_cnt}" "" && ((line++))
+
+        printf "${VL}${STANDOUT} BLOCKS ${NC}  Leader  | Ideal  | Luck    | Adopted | Confirmed%$((width-59))s${VL}\n" "" && ((line++))
+        printf "${VL}%10s${leader_fmt}%-10s%-9s%-10s${adopted_fmt}%-10s${confirmed_fmt}%-9s${NC}%$((width-59))s${VL}\n" "" "${leader_cnt}" "${epoch_stats[0]}" "${epoch_stats[1]}" "${adopted_cnt}" "${confirmed_cnt}" "" && ((line++))   
         
         if [[ ${invalid_cnt} -ne 0 || ${missed_cnt} -ne 0 || ${ghosted_cnt} -ne 0 || ${stolen_cnt} -ne 0 ]]; then
-          echo "${m3divider}" && ((line++))
           printf "${VL}%10sInvalid | Missed | Ghosted | Stolen%$((width-46))s${VL}\n" "" && ((line++))
           printf "${VL}%10s${invalid_fmt}%-10s${missed_fmt}%-9s${ghosted_fmt}%-10s${stolen_fmt}%-6s${NC}%$((width-46))s${VL}\n" "" "${invalid_cnt}" "${missed_cnt}" "${ghosted_cnt}" "${stolen_cnt}" "" && ((line++))
+        fi
+        
+        if [[ -n ${leader_next} ]]; then
+          leader_time_left=$((  $(date -u -d ${leader_next} +%s) - $(date -u +%s) ))
+          if [[ ${leader_time_left} -gt 0 ]]; then
+            setSizeAndStyleOfProgressBar ${leader_time_left}
+            leader_time_left_fmt="$(timeLeft ${leader_time_left})"
+            leader_progress=$(echo "(1-(${leader_time_left}/${leader_bar_span}))*100" | bc -l)
+            leader_items=$(( ($(printf %.0f "${leader_progress}") * granularity_small) / 100 ))
+            printf "${VL} ${style_values_1}%$((second_col-17))s${NC} until leader" "${leader_time_left_fmt}"
+            tput cup ${line} ${bar_col_small}
+            for i in $(seq 0 $((granularity_small-1))); do
+              [[ $i -lt ${leader_items} ]] && printf "${leader_bar_style}${char_marked}" || printf "${NC}${char_unmarked}"
+            done
+            printf "${NC}${VL}\n" && ((line++))
+          fi
         fi
       else
         printf "${VL}${STANDOUT} BLOCKS ${NC} %$((width-38))s %-6s | ${FG_GREEN}%-7s${NC} | ${FG_RED}%-7s${NC} ${VL}\n" "" "Leader" "Adopted" "Invalid" && ((line++))

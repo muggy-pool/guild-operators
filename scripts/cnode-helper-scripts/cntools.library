@@ -9,7 +9,7 @@
 # Any breaking changes (eg: that requires change of cntools.config, env or a change in priv folder would be considered breaking and will be exempt from auto-update)
 CNTOOLS_MAJOR_VERSION=6
 # Changes that can be applied without breaking existing functionality that can be applied from within CNTools
-CNTOOLS_MINOR_VERSION=2
+CNTOOLS_MINOR_VERSION=3
 # Backwards compatible bug fixes. No additional functionality or major changes and can be applied from within CNTools
 CNTOOLS_PATCH_VERSION=1
 CNTOOLS_VERSION="${CNTOOLS_MAJOR_VERSION}.${CNTOOLS_MINOR_VERSION}.${CNTOOLS_PATCH_VERSION}"
@@ -28,32 +28,8 @@ CNTOOLS_VERSION="${CNTOOLS_MAJOR_VERSION}.${CNTOOLS_MINOR_VERSION}.${CNTOOLS_PAT
 [[ -z ${WALLET_SELECTION_FILTER_LIMIT} ]] && WALLET_SELECTION_FILTER_LIMIT=10
 [[ -z ${KES_ALERT_PERIOD} ]] && KES_ALERT_PERIOD=172800 # default 2 days
 [[ -z ${KES_WARNING_PERIOD} ]] && KES_WARNING_PERIOD=604800 # default 7 days
+[[ $(uname) == Darwin ]] && ENABLE_CHATTR=false
 [[ -z ${ENABLE_CHATTR} ]] && ENABLE_CHATTR=true
-[[ -z ${WALLET_FOLDER} ]] && WALLET_FOLDER="${CNODE_HOME}/priv/wallet"
-[[ -z ${POOL_FOLDER} ]] && POOL_FOLDER="${CNODE_HOME}/priv/pool"
-[[ -z ${WALLET_PAY_VK_FILENAME} ]] && WALLET_PAY_VK_FILENAME="payment.vkey"
-[[ -z ${WALLET_PAY_SK_FILENAME} ]] && WALLET_PAY_SK_FILENAME="payment.skey"
-[[ -z ${WALLET_PAY_ADDR_FILENAME} ]] && WALLET_PAY_ADDR_FILENAME="payment.addr"
-[[ -z ${WALLET_BASE_ADDR_FILENAME} ]] && WALLET_BASE_ADDR_FILENAME="base.addr"
-[[ -z ${WALLET_STAKE_VK_FILENAME} ]] && WALLET_STAKE_VK_FILENAME="stake.vkey"
-[[ -z ${WALLET_STAKE_SK_FILENAME} ]] && WALLET_STAKE_SK_FILENAME="stake.skey"
-[[ -z ${WALLET_STAKE_ADDR_FILENAME} ]] && WALLET_STAKE_ADDR_FILENAME="reward.addr"
-[[ -z ${WALLET_STAKE_CERT_FILENAME} ]] && WALLET_STAKE_CERT_FILENAME="stake.cert"
-[[ -z ${WALLET_STAKE_DEREG_FILENAME} ]] && WALLET_STAKE_DEREG_FILENAME="stake.dereg"
-[[ -z ${WALLET_DELEGCERT_FILENAME} ]] && WALLET_DELEGCERT_FILENAME="delegation.cert"
-[[ -z ${POOL_ID_FILENAME} ]] && POOL_ID_FILENAME="pool.id"
-[[ -z ${POOL_HOTKEY_VK_FILENAME} ]] && POOL_HOTKEY_VK_FILENAME="hot.vkey"
-[[ -z ${POOL_HOTKEY_SK_FILENAME} ]] && POOL_HOTKEY_SK_FILENAME="hot.skey"
-[[ -z ${POOL_COLDKEY_VK_FILENAME} ]] && POOL_COLDKEY_VK_FILENAME="cold.vkey"
-[[ -z ${POOL_COLDKEY_SK_FILENAME} ]] && POOL_COLDKEY_SK_FILENAME="cold.skey"
-[[ -z ${POOL_OPCERT_COUNTER_FILENAME} ]] && POOL_OPCERT_COUNTER_FILENAME="cold.counter"
-[[ -z ${POOL_OPCERT_FILENAME} ]] && POOL_OPCERT_FILENAME="op.cert"
-[[ -z ${POOL_VRF_VK_FILENAME} ]] && POOL_VRF_VK_FILENAME="vrf.vkey"
-[[ -z ${POOL_VRF_SK_FILENAME} ]] && POOL_VRF_SK_FILENAME="vrf.skey"
-[[ -z ${POOL_CONFIG_FILENAME} ]] && POOL_CONFIG_FILENAME="pool.config"
-[[ -z ${POOL_REGCERT_FILENAME} ]] && POOL_REGCERT_FILENAME="pool.cert"
-[[ -z ${POOL_CURRENT_KES_START} ]] && POOL_CURRENT_KES_START="kes.start"
-[[ -z ${POOL_DEREGCERT_FILENAME} ]] && POOL_DEREGCERT_FILENAME="pool.dereg"
 
 ############################################################
 # library sourced by cntools with common taskes to perform #
@@ -122,8 +98,7 @@ say() {
 #   >> need_cmd "jq"
 need_cmd() {
   if ! command -v "$1" > /dev/null 2>&1; then
-    need_cmd_error="${FG_RED}ERROR${NC}: need '$1' (command not found)\ntry 'sudo apt install $1'\nplease install with your packet manager of choice(apt/yum etc..) and relaunch CNTools"
-    waitForInput "press any key"
+    say "${FG_RED}ERROR${NC}: need '$1' (command not found)\ntry 'sudo apt install $1'\nplease install with your packet manager of choice(apt/yum etc..) and relaunch CNTools"
     return 1
   fi
 }
@@ -136,13 +111,12 @@ need_cmd() {
 # Examples of Usage:
 #   >> protectionPreRequisites
 protectionPreRequisites() {
-  if ! need_cmd "gpg" || \
-     ! need_cmd "systemd-ask-password"; then
+  if ! need_cmd "gpg"; then
     return 1
   fi
 
-  if ! need_cmd "chattr"; then 
-    [[ ${ENABLE_CHATTR} = true ]] && say "chattr command not available but enabled in config, please disable in cntools.config and re-run CNTools" && return 1
+  if ! need_cmd "chattr" &>/dev/null; then
+    [[ ${ENABLE_CHATTR} = true ]] && say "chattr command not available but enabled in config, please install or disable in cntools.config and re-run CNTools" && return 1
   elif [[ ${ENABLE_CHATTR} = true ]]; then # chattr available and enabled, make sure sudo access to chattr is enabled
     touch "${TMP_FOLDER}"/test
     echo "Testing chattr access permission, enter user password if requested..."
@@ -153,7 +127,6 @@ protectionPreRequisites() {
       say "Add required sudo permissions or run the following command to add passwordless sudo access to chattr command for '$(whoami)' user"
       say ""
       say "echo \"$(whoami) ALL=NOPASSWD: $(command -v chattr)\" | sudo tee /etc/sudoers.d/cntools"
-      waitForInput "press any key"
       return 1
     fi
     rm -f "${TMP_FOLDER}"/test
@@ -239,15 +212,15 @@ EOF
 fileDialog() {
   dialogSetup
   local firstrow=$(get_cursor_row)
-  [[ -n $3 ]] && start_path="$3/" || start_path="/tmp/"
+  [[ -n $3 ]] && start_path="$3" || start_path="/tmp/"
   if [[ $1 -eq 1 ]]; then
     say "\nFile Explorer:"
     say "  Tab        -  Select area to navigate"
     say "  Arrow keys -  Move up/down"
     say "  Space      -  Append the currently-selected item into the work-area"
     say "  Enter      -  OK and exit by default if not Cancel is selected"
+    waitForInput "Press any key to open the file explorer"
   fi
-  waitForInput "Press any key to open the file explorer"
   file=$(dialog --stdout --clear --keep-tite --title "$2" --fselect "${start_path}" $(($(tput lines)-14)) $(($(tput cols)-10)))
   cursor_to ${firstrow}
   tput ed
@@ -264,8 +237,8 @@ dirDialog() {
     say "  Arrow keys -  Move up/down"
     say "  Space      -  Append the currently-selected item into the work-area"
     say "  Enter      -  OK and exit by default if not Cancel is selected"
+    waitForInput "Press any key to open the directory explorer"
   fi
-  waitForInput "Press any key to open the directory explorer"
   dir=$(dialog --stdout --clear --keep-tite --title "$2" --dselect "${start_path}" $(($(tput lines)-14)) $(($(tput cols)-10)))
   cursor_to ${firstrow}
   tput ed
@@ -418,16 +391,17 @@ function getDirs {
   return 0
 }
 
-# Command    : selectDir [dir1 dir2 ...]
+# Command    : selectDir [type] [dir1 dir2 ...]
 # Description: A helper function to selectOption() specifically for directory selection
-# Parameters : array of dirs    >   array of dirs to include in selection, '[Esc] Cancel' option added to all selections
+# Parameters : type             >   'wallet' or 'pool' 
+#            : array of dirs    >   array of dirs to include in selection, '[Esc] Cancel' option added to all selections
 # Return     : populates ${dir_name} variable,
 # Examples of Usage:
 #   >> selectDir Wallet1 Wallet2 Wallet3
 #
 function selectDir {
   local type=$1 && shift
-  dirs=("$@")
+  dirs=( "$@" )
   dirs+=("[Esc] Cancel")
   selectOption "${dirs[@]}" 1>&2
   dir_name=${dirs[$?]}
@@ -482,7 +456,7 @@ function selectWallet {
         getBaseAddress ${dir}
         getBalance ${base_addr}
         if getRewardAddress ${dir}; then
-          delegation_pool_id=$(${CCLI} shelley query stake-address-info ${PROTOCOL_IDENTIFIER} ${NETWORK_IDENTIFIER} --address "${reward_addr}" | jq -r '.[0].delegation // empty')
+          delegation_pool_id=$(${CCLI} query stake-address-info ${ERA_IDENTIFIER} ${PROTOCOL_IDENTIFIER} ${NETWORK_IDENTIFIER} --address "${reward_addr}" | jq -r '.[0].delegation // empty')
           unset poolName
           if [[ -n ${delegation_pool_id} ]]; then
             while IFS= read -r -d '' pool; do
@@ -574,8 +548,8 @@ function selectPool {
 #   >> local userPassword=$(getPassword confirm)
 getPassword() {
   while true; do
-    say "Enter key password (length >= 8)"
-    password=$(systemd-ask-password "Password:")
+    readPassword "Enter password (length >= 8)"
+    password=${read_password} && unset read_password
     if [ ${#password} -lt 8 ]; then
       say ""
       say "${FG_RED}ERROR${NC}: password length too short, please use a minimum of 8 characters."
@@ -586,19 +560,34 @@ getPassword() {
       continue
     fi
     if [[ "$1" = "confirm" ]]; then
-      local checkPassword=$(systemd-ask-password "Confirm: ")
-      if [[ "${password}" != "${checkPassword}" ]]; then
+      echo && readPassword "Confirm password"
+      check_password=${read_password} && unset read_password
+      if [[ "${password}" != "${check_password}" ]]; then
         say ""
         say "${FG_RED}ERROR${NC}: password missmatch!"
         say ""
         read -r -n 1 -s -p "Press q to abort or any other key to retry" abort
-        [[ ${abort} = "q" ]] && unset password && return 1
+        [[ ${abort} = "q" ]] && unset password && unset check_password && return 1
         say "\n"
       else
-        say "" && return
+        say "" && unset check_password && return
       fi
     else
       say "" && return
+    fi
+  done
+}
+readPassword() {
+  read_password=""
+  prompt="$1: "
+  while IFS= read -p "${prompt}" -r -s -n 1 char; do
+    if [[ ${char} == $'\0' ]]; then break; fi
+    if [[ ${char} == $'\b' ]]; then
+      [[ ${#read_password} -gt 0 ]] && printf "\033[1D\033[0K" && read_password=${read_password%?}
+      prompt=''
+    else
+      prompt='*'
+      read_password+="${char}"
     fi
   done
 }
@@ -801,13 +790,27 @@ validateDecimalNbr() {
 }
 
 # Command    : formatLovelace
-# Description: Pretty print Lovelace value using locales
+# Description: Pretty print Lovelace value
 # Parameters : Lovelace  >  Amount in Lovelace
-# Return     : Formatted string (warning: the string can contain unicode characters in some locales)
+# Return     : Formatted string
 formatLovelace() {
   re_int_nbr='^[0-9]+$'
   if [[ $1 =~ ${re_int_nbr} ]]; then
-    printf "%'.6f" ${1}e-6
+    [[ $1 -le 999999 ]] && printf $1 && return
+    printf '%s.%s' "$(sed ':a;s/\B[0-9]\{3\}\>/,&/;ta' <<< ${1::-6})" "${1: -6}"
+  else
+    say "${FG_RED}ERROR${NC}: must be a valid integer number"
+    return 1
+  fi
+}
+# Command    : formatAda
+# Description: Pretty print Ada value
+# Parameters : Ada  >  Amount in Ada
+# Return     : Formatted string
+formatAda() {
+  re_int_nbr='^[0-9]+$'
+  if [[ $1 =~ ${re_int_nbr} ]]; then
+    sed ':a;s/\B[0-9]\{3\}\>/,&/;ta' <<< $1
   else
     say "${FG_RED}ERROR${NC}: must be a valid integer number"
     return 1
@@ -879,8 +882,8 @@ getPoolID() {
   pool_id_bech32=""
   pool_coldkey_vk_file="${POOL_FOLDER}/${1}/${POOL_COLDKEY_VK_FILENAME}"
   if [[ -f ${pool_coldkey_vk_file} ]]; then
-    if ! pool_id=$(${CCLI} shelley stake-pool id --cold-verification-key-file "${pool_coldkey_vk_file}" --output-format hex 2>/dev/null) || \
-       ! pool_id_bech32=$(${CCLI} shelley stake-pool id --cold-verification-key-file "${pool_coldkey_vk_file}" 2>/dev/null); then
+    if ! pool_id=$(${CCLI} stake-pool id --cold-verification-key-file "${pool_coldkey_vk_file}" --output-format hex 2>/dev/null) || \
+       ! pool_id_bech32=$(${CCLI} stake-pool id --cold-verification-key-file "${pool_coldkey_vk_file}" 2>/dev/null); then
       return 1
     fi
     echo ${pool_id} > "${pool_id_file}"
@@ -899,7 +902,7 @@ getPayAddress() {
   payment_vk_file="${WALLET_FOLDER}/${1}/${WALLET_PAY_VK_FILENAME}"
   payment_addr_file="${WALLET_FOLDER}/${1}/${WALLET_PAY_ADDR_FILENAME}"
   if [[ -f "${payment_vk_file}" ]]; then
-    if ${CCLI} shelley address build --payment-verification-key-file "${payment_vk_file}" --out-file "${payment_addr_file}" ${NETWORK_IDENTIFIER} 2>/dev/null; then
+    if ${CCLI} address build --payment-verification-key-file "${payment_vk_file}" --out-file "${payment_addr_file}" ${NETWORK_IDENTIFIER} 2>/dev/null; then
       pay_addr=$(cat "${payment_addr_file}")
       return 0
     fi
@@ -916,7 +919,7 @@ getBaseAddress() {
   stake_vk_file="${WALLET_FOLDER}/${1}/${WALLET_STAKE_VK_FILENAME}"
   base_addr_file="${WALLET_FOLDER}/${1}/${WALLET_BASE_ADDR_FILENAME}"
   if [[ -f "${payment_vk_file}" && -f "${stake_vk_file}" ]]; then
-    if ${CCLI} shelley address build --payment-verification-key-file "${payment_vk_file}" --stake-verification-key-file "${stake_vk_file}" --out-file "${base_addr_file}" ${NETWORK_IDENTIFIER} 2>/dev/null; then
+    if ${CCLI} address build --payment-verification-key-file "${payment_vk_file}" --stake-verification-key-file "${stake_vk_file}" --out-file "${base_addr_file}" ${NETWORK_IDENTIFIER} 2>/dev/null; then
       base_addr=$(cat "${base_addr_file}")
       return 0
     fi
@@ -932,7 +935,7 @@ getRewardAddress() {
   stake_vk_file="${WALLET_FOLDER}/${1}/${WALLET_STAKE_VK_FILENAME}"
   stake_addr_file="${WALLET_FOLDER}/${1}/${WALLET_STAKE_ADDR_FILENAME}"
   if [[ -f "${stake_vk_file}" ]]; then
-    if ${CCLI} shelley stake-address build --stake-verification-key-file "${stake_vk_file}" --out-file "${stake_addr_file}" ${NETWORK_IDENTIFIER} 2>/dev/null; then
+    if ${CCLI} stake-address build --stake-verification-key-file "${stake_vk_file}" --out-file "${stake_addr_file}" ${NETWORK_IDENTIFIER} 2>/dev/null; then
       reward_addr=$(cat "${stake_addr_file}")
       return 0
     fi
@@ -945,7 +948,7 @@ getRewardAddress() {
 # Description: get address info from from node
 # Return     : populates $address_info
 getAddressInfo() {
-  address_info=$(${CCLI} shelley address info --address $1)
+  address_info=$(${CCLI} address info --address $1)
 }
 
 # Command    : getBalance [address]
@@ -957,7 +960,7 @@ getBalance() {
 
   [[ -z $1 ]] && return 1
 
-  if ! ${CCLI} shelley query utxo ${PROTOCOL_IDENTIFIER} ${NETWORK_IDENTIFIER} --address "${1}" > "${TMP_FOLDER}"/fullUtxo.out; then return 1; fi
+  if ! ${CCLI} query utxo ${ERA_IDENTIFIER} ${PROTOCOL_IDENTIFIER} ${NETWORK_IDENTIFIER} --address "${1}" > "${TMP_FOLDER}"/fullUtxo.out; then return 1; fi
   tail -n +3 "${TMP_FOLDER}"/fullUtxo.out | sort -k3 -nr > "${TMP_FOLDER}"/balance.out
 
   while read -r utxo; do
@@ -1039,10 +1042,10 @@ sendADA() {
 
   say "" 1
   say "# Calculate fee, new amount and remaining balance" 1 "log"
-  say "$ ${CCLI} shelley transaction build-raw ${txIn} --tx-out ${dAddr}+0 --ttl ${ttlValue} --fee 0 --out-file ${TMP_FOLDER}/tx0.tmp" 2
-  if ! ${CCLI} shelley transaction build-raw ${txIn} --tx-out ${dAddr}+0 --ttl ${ttlValue} --fee 0 --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
+  say "$ ${CCLI} transaction build-raw ${txIn} --tx-out ${dAddr}+0 --invalid-hereafter ${ttlValue} --fee 0 ${ERA_IDENTIFIER} --out-file ${TMP_FOLDER}/tx0.tmp" 2
+  if ! ${CCLI} transaction build-raw ${txIn} --tx-out ${dAddr}+0 --invalid-hereafter ${ttlValue} --fee 0 ${ERA_IDENTIFIER} --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
   minFeeArgs=(
-    shelley transaction calculate-min-fee
+    transaction calculate-min-fee
     --tx-body-file "${TMP_FOLDER}"/tx0.tmp
     --tx-in-count ${utxoCount}
     --tx-out-count ${outCount}
@@ -1094,7 +1097,7 @@ sendADA() {
   buildArgs=(
     ${txIn}
     ${txOut}
-    --ttl ${ttlValue}
+    --invalid-hereafter ${ttlValue}
     --fee ${minFee}
     --out-file "${TMP_FOLDER}"/tx.raw
   )
@@ -1171,10 +1174,10 @@ sendMetadata() {
 
   say "" 1
   say "# Calculate fee, new amount and remaining balance" 1 "log"
-  say "$ ${CCLI} shelley transaction build-raw ${tx_in} --tx-out ${addr}+0 --ttl ${ttlValue} --fee 0 ${metadata} --out-file ${TMP_FOLDER}/tx0.tmp" 2
-  if ! ${CCLI} shelley transaction build-raw ${tx_in} --tx-out ${addr}+0 --ttl ${ttlValue} --fee 0 ${metadata} --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
+  say "$ ${CCLI} transaction build-raw ${tx_in} --tx-out ${addr}+0 --invalid-hereafter ${ttlValue} --fee 0 ${metadata} ${ERA_IDENTIFIER} --out-file ${TMP_FOLDER}/tx0.tmp" 2
+  if ! ${CCLI} transaction build-raw ${tx_in} --tx-out ${addr}+0 --invalid-hereafter ${ttlValue} --fee 0 ${metadata} ${ERA_IDENTIFIER} --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
   minFeeArgs=(
-    shelley transaction calculate-min-fee
+    transaction calculate-min-fee
     --tx-body-file "${TMP_FOLDER}"/tx0.tmp
     --tx-in-count ${utx0_count}
     --tx-out-count 1
@@ -1202,7 +1205,7 @@ sendMetadata() {
   buildArgs=(
     ${tx_in}
     ${tx_out}
-    --ttl ${ttlValue}
+    --invalid-hereafter ${ttlValue}
     --fee ${minFee}
     ${metadata}
     --out-file "${TMP_FOLDER}"/tx.raw
@@ -1234,7 +1237,7 @@ sendMetadata() {
 # Return     : 0 if registered, else 1
 isWalletRegistered() {
   if getRewardAddress $1; then
-    stakeAddressInfo=$(${CCLI} shelley query stake-address-info ${PROTOCOL_IDENTIFIER} ${NETWORK_IDENTIFIER} --address ${reward_addr} | jq -r '.[0] // empty')
+    stakeAddressInfo=$(${CCLI} query stake-address-info ${ERA_IDENTIFIER} ${PROTOCOL_IDENTIFIER} ${NETWORK_IDENTIFIER} --address ${reward_addr} | jq -r '.[0] // empty')
     [[ -n "${stakeAddressInfo}" ]] && return 0
   fi
   return 1
@@ -1258,8 +1261,8 @@ registerStakeWallet() {
 
   say "Creating registration certificate" 1 "log"
   say "" 1
-  say "${CCLI} shelley stake-address registration-certificate --stake-verification-key-file ${stake_vk_file} --out-file ${stake_cert_file}" 2
-  if ! ${CCLI} shelley stake-address registration-certificate --stake-verification-key-file "${stake_vk_file}" --out-file "${stake_cert_file}"; then return 1; fi
+  say "${CCLI} stake-address registration-certificate --stake-verification-key-file ${stake_vk_file} --out-file ${stake_cert_file}" 2
+  if ! ${CCLI} stake-address registration-certificate --stake-verification-key-file "${stake_vk_file}" --out-file "${stake_cert_file}"; then return 1; fi
 
   say "# Protocol Parameters" 1 "log"
   currSlot=$(getSlotTip)
@@ -1294,10 +1297,10 @@ registerStakeWallet() {
 
   say "" 1
   say "# Calculate fee" 1 "log"
-  say "$ ${CCLI} shelley transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --ttl ${ttlValue} --fee 0 --certificate-file ${stake_cert_file} --out-file ${TMP_FOLDER}/tx0.tmp" 2
-  if ! ${CCLI} shelley transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --ttl ${ttlValue} --fee 0 --certificate-file ${stake_cert_file} --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
+  say "$ ${CCLI} transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --invalid-hereafter ${ttlValue} --fee 0 --certificate-file ${stake_cert_file} ${ERA_IDENTIFIER} --out-file ${TMP_FOLDER}/tx0.tmp" 2
+  if ! ${CCLI} transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --invalid-hereafter ${ttlValue} --fee 0 --certificate-file ${stake_cert_file} ${ERA_IDENTIFIER} --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
   minFeeArgs=(
-    shelley transaction calculate-min-fee
+    transaction calculate-min-fee
     --tx-body-file "${TMP_FOLDER}"/tx0.tmp
     --tx-in-count ${utx0_count}
     --tx-out-count 1
@@ -1326,7 +1329,7 @@ registerStakeWallet() {
   buildArgs=(
     ${tx_in}
     ${tx_out}
-    --ttl ${ttlValue}
+    --invalid-hereafter ${ttlValue}
     --fee ${minFee}
     --certificate-file ${stake_cert_file}
     --out-file "${TMP_FOLDER}"/tx.raw
@@ -1390,8 +1393,8 @@ deregisterStakeWallet() {
 
   say "Creating deregistration certificate" 1 "log"
   say "" 1
-  say "${CCLI} shelley stake-address deregistration-certificate --stake-verification-key-file ${stake_vk_file} --out-file ${stake_dereg_file}" 2
-  if ! ${CCLI} shelley stake-address deregistration-certificate --stake-verification-key-file "${stake_vk_file}" --out-file "${stake_dereg_file}"; then return 1; fi
+  say "${CCLI} stake-address deregistration-certificate --stake-verification-key-file ${stake_vk_file} --out-file ${stake_dereg_file}" 2
+  if ! ${CCLI} stake-address deregistration-certificate --stake-verification-key-file "${stake_vk_file}" --out-file "${stake_dereg_file}"; then return 1; fi
 
   say "# Protocol Parameters" 1 "log"
   currSlot=$(getSlotTip)
@@ -1426,10 +1429,10 @@ deregisterStakeWallet() {
 
   say "" 1
   say "# Calculate fee" 1 "log"
-  say "$ ${CCLI} shelley transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --ttl ${ttlValue} --fee 0 --certificate-file ${stake_dereg_file} --out-file ${TMP_FOLDER}/tx0.tmp" 2
-  if ! ${CCLI} shelley transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --ttl ${ttlValue} --fee 0 --certificate-file ${stake_dereg_file} --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
+  say "$ ${CCLI} transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --invalid-hereafter ${ttlValue} --fee 0 --certificate-file ${stake_dereg_file} ${ERA_IDENTIFIER} --out-file ${TMP_FOLDER}/tx0.tmp" 2
+  if ! ${CCLI} transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --invalid-hereafter ${ttlValue} --fee 0 --certificate-file ${stake_dereg_file} ${ERA_IDENTIFIER} --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
   minFeeArgs=(
-    shelley transaction calculate-min-fee
+    transaction calculate-min-fee
     --tx-body-file "${TMP_FOLDER}"/tx0.tmp
     --tx-in-count ${utx0_count}
     --tx-out-count 1
@@ -1458,7 +1461,7 @@ deregisterStakeWallet() {
   buildArgs=(
     ${tx_in}
     ${tx_out}
-    --ttl ${ttlValue}
+    --invalid-hereafter ${ttlValue}
     --fee ${minFee}
     --certificate-file ${stake_dereg_file}
     --out-file "${TMP_FOLDER}"/tx.raw
@@ -1514,7 +1517,7 @@ registerPool() {
   getBalance ${base_addr}
   shift 4
   multi_owner_count=$#
-  multi_owner_keys=$@
+  multi_owner_keys=( "$@" )
 
   if [[ ! -s "${TMP_FOLDER}"/balance.out ]]; then
     say "${FG_RED}ERROR${NC}: wallet empty"
@@ -1566,10 +1569,10 @@ registerPool() {
 
   say "" 1
   say "# Calculate fee, new amount and remaining balance" 1 "log"
-  say "$ ${CCLI} shelley transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --ttl ${ttlValue} --certificate-file ${pool_regcert_file} --certificate-file ${owner_delegation_cert_file} ${reward_delegation_cert} --fee 0 --out-file ${TMP_FOLDER}/tx0.tmp" 2
-  if ! ${CCLI} shelley transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --ttl ${ttlValue} --certificate-file ${pool_regcert_file} --certificate-file ${owner_delegation_cert_file} ${reward_delegation_cert} --fee 0 --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
+  say "$ ${CCLI} transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --invalid-hereafter ${ttlValue} --certificate-file ${pool_regcert_file} --certificate-file ${owner_delegation_cert_file} ${reward_delegation_cert} --fee 0 ${ERA_IDENTIFIER} --out-file ${TMP_FOLDER}/tx0.tmp" 2
+  if ! ${CCLI} transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --invalid-hereafter ${ttlValue} --certificate-file ${pool_regcert_file} --certificate-file ${owner_delegation_cert_file} ${reward_delegation_cert} --fee 0 ${ERA_IDENTIFIER} --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
   minFeeArgs=(
-    shelley transaction calculate-min-fee
+    transaction calculate-min-fee
     --tx-body-file "${TMP_FOLDER}"/tx0.tmp
     --tx-in-count ${utx0_count}
     --tx-out-count 1
@@ -1597,7 +1600,7 @@ registerPool() {
   buildArgs=(
     ${tx_in}
     ${tx_out}
-    --ttl ${ttlValue}
+    --invalid-hereafter ${ttlValue}
     --fee ${minFee}
     --certificate-file ${pool_regcert_file}
     --certificate-file ${owner_delegation_cert_file}
@@ -1652,7 +1655,7 @@ modifyPool() {
   getBalance ${base_addr}
   shift 3
   multi_owner_count=$#
-  multi_owner_keys=$@
+  multi_owner_keys=( "$@" )
   
   if [[ ! -s "${TMP_FOLDER}"/balance.out ]]; then
     say "${FG_RED}ERROR${NC}: wallet empty"
@@ -1698,10 +1701,10 @@ modifyPool() {
 
   say "" 1
   say "# Calculate fee, new amount and remaining balance" 1 "log"
-  say "$ ${CCLI} shelley transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --ttl ${ttlValue} --certificate-file ${pool_regcert_file} --fee 0 --out-file ${TMP_FOLDER}/tx0.tmp" 2
-  if ! ${CCLI} shelley transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --ttl ${ttlValue} --certificate-file ${pool_regcert_file} --fee 0 --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
+  say "$ ${CCLI} transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --invalid-hereafter ${ttlValue} --certificate-file ${pool_regcert_file} --fee 0 ${ERA_IDENTIFIER} --out-file ${TMP_FOLDER}/tx0.tmp" 2
+  if ! ${CCLI} transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --invalid-hereafter ${ttlValue} --certificate-file ${pool_regcert_file} --fee 0 ${ERA_IDENTIFIER} --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
   minFeeArgs=(
-    shelley transaction calculate-min-fee
+    transaction calculate-min-fee
     --tx-body-file "${TMP_FOLDER}"/tx0.tmp
     --tx-in-count ${utx0_count}
     --tx-out-count 1
@@ -1729,7 +1732,7 @@ modifyPool() {
   buildArgs=(
     ${tx_in}
     ${tx_out}
-    --ttl ${ttlValue}
+    --invalid-hereafter ${ttlValue}
     --fee ${minFee}
     --certificate-file ${pool_regcert_file}
     --out-file "${TMP_FOLDER}"/tx.raw
@@ -1803,10 +1806,10 @@ withdrawRewards() {
 
   say "" 1
   say "# Calculate fee, new amount and remaining balance" 1 "log"
-  say "$ ${CCLI} shelley transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --ttl ${ttlValue} --fee 0 --out-file ${TMP_FOLDER}/tx0.tmp" 2
-  if ! ${CCLI} shelley transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --ttl ${ttlValue} --fee 0 --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
+  say "$ ${CCLI} transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --invalid-hereafter ${ttlValue} --fee 0 ${ERA_IDENTIFIER} --out-file ${TMP_FOLDER}/tx0.tmp" 2
+  if ! ${CCLI} transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --invalid-hereafter ${ttlValue} --fee 0 ${ERA_IDENTIFIER} --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
   minFeeArgs=(
-    shelley transaction calculate-min-fee
+    transaction calculate-min-fee
     --tx-body-file "${TMP_FOLDER}"/tx0.tmp
     --tx-in-count ${utx0_count}
     --tx-out-count 1
@@ -1835,7 +1838,7 @@ withdrawRewards() {
     ${tx_in}
     ${tx_out}
     --withdrawal ${stake_addr}+${reward_lovelace}
-    --ttl ${ttlValue}
+    --invalid-hereafter ${ttlValue}
     --fee ${minFee}
     --out-file "${TMP_FOLDER}"/tx.raw
   )
@@ -1915,10 +1918,10 @@ delegate() {
 
   say "" 1
   say "# Calculate fee, new amount and remaining balance" 1 "log"
-  say "$ ${CCLI} shelley transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --ttl ${ttlValue} --fee 0 --certificate-file ${pool_delegcert_file} --out-file ${TMP_FOLDER}/tx0.tmp" 2
-  if ! ${CCLI} shelley transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --ttl ${ttlValue} --fee 0 --certificate-file ${pool_delegcert_file} --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
+  say "$ ${CCLI} transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --invalid-hereafter ${ttlValue} --fee 0 --certificate-file ${pool_delegcert_file} ${ERA_IDENTIFIER} --out-file ${TMP_FOLDER}/tx0.tmp" 2
+  if ! ${CCLI} transaction build-raw ${tx_in} --tx-out ${base_addr}+0 --invalid-hereafter ${ttlValue} --fee 0 --certificate-file ${pool_delegcert_file} ${ERA_IDENTIFIER} --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
   minFeeArgs=(
-    shelley transaction calculate-min-fee
+    transaction calculate-min-fee
     --tx-body-file "${TMP_FOLDER}"/tx0.tmp
     --tx-in-count ${utx0_count}
     --tx-out-count 1
@@ -1946,7 +1949,7 @@ delegate() {
   buildArgs=(
     ${tx_in}
     ${tx_out}
-    --ttl ${ttlValue}
+    --invalid-hereafter ${ttlValue}
     --fee ${minFee}
     --certificate-file ${pool_delegcert_file}
     --out-file "${TMP_FOLDER}"/tx.raw
@@ -2024,10 +2027,10 @@ deRegisterPool() {
 
   say "" 1
   say "# Calculate fee, new amount and remaining balance" 1 "log"
-  say "$ ${CCLI} shelley transaction build-raw ${tx_in} --tx-out ${wallet_addr}+0 --ttl ${ttlValue} --fee 0 --certificate-file ${pool_deregcert_file} --out-file ${TMP_FOLDER}/tx0.tmp" 2
-  if ! ${CCLI} shelley transaction build-raw ${tx_in} --tx-out ${wallet_addr}+0 --ttl ${ttlValue} --fee 0 --certificate-file ${pool_deregcert_file} --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
+  say "$ ${CCLI} transaction build-raw ${tx_in} --tx-out ${wallet_addr}+0 --invalid-hereafter ${ttlValue} --fee 0 --certificate-file ${pool_deregcert_file} ${ERA_IDENTIFIER} --out-file ${TMP_FOLDER}/tx0.tmp" 2
+  if ! ${CCLI} transaction build-raw ${tx_in} --tx-out ${wallet_addr}+0 --invalid-hereafter ${ttlValue} --fee 0 --certificate-file ${pool_deregcert_file} ${ERA_IDENTIFIER} --out-file "${TMP_FOLDER}"/tx0.tmp; then return 1; fi
   minFeeArgs=(
-    shelley transaction calculate-min-fee
+    transaction calculate-min-fee
     --tx-body-file "${TMP_FOLDER}"/tx0.tmp
     --tx-in-count ${utx0_count}
     --tx-out-count 1
@@ -2055,7 +2058,7 @@ deRegisterPool() {
   buildArgs=(
     ${tx_in}
     ${tx_out}
-    --ttl ${ttlValue}
+    --invalid-hereafter ${ttlValue}
     --fee ${minFee}
     --certificate-file ${pool_deregcert_file}
     --out-file "${TMP_FOLDER}"/tx.raw
@@ -2093,8 +2096,8 @@ deRegisterPool() {
 #
 buildTx() {
   say "Building transaction" 1
-  say "$ ${CCLI} shelley transaction build-raw ${buildArgs[*]}" 2
-  output=$(${CCLI} shelley transaction build-raw ${buildArgs[*]})
+  say "$ ${CCLI} transaction build-raw ${ERA_IDENTIFIER} ${buildArgs[*]}" 2
+  output=$(${CCLI} transaction build-raw ${ERA_IDENTIFIER} ${buildArgs[*]})
   if [[ -n $output ]]; then
     say "${FG_RED}ERROR${NC}: Problem during tx creation with args ${buildArgs[*]}"
     say "$output"
@@ -2114,17 +2117,15 @@ signTx() {
   parent_dir="$(dirname "${tx_raw}")"
   tx_signed="${parent_dir}/tx.signed_$(date +%s)"
   shift
-  skey_count=0
   tx_sign_keys=()
   for skey in "$@"; do
     if [[ -f "${skey}" ]]; then
       tx_sign_keys+=( --signing-key-file ${skey} )
-      ((skey_count++))
     fi
   done
   
   signArgs=(
-    shelley transaction sign
+    transaction sign
     --tx-body-file "${tx_raw}"
     ${tx_sign_keys[*]}
     ${NETWORK_IDENTIFIER}
@@ -2152,7 +2153,7 @@ submitTx() {
   tx_signed="$1"
 
   submitArgs=(
-    shelley transaction submit
+    transaction submit
     --tx-file "${tx_signed}"
     ${PROTOCOL_IDENTIFIER}
     ${NETWORK_IDENTIFIER}
@@ -2215,75 +2216,11 @@ rotatePoolKeys() {
   echo "${current_kes_period}" > ${pool_saved_kes_start}
 
   say "creating new hot keys and certificate" 1
-  say "$ ${CCLI} shelley node key-gen-KES --verification-key-file ${pool_hotkey_vk_file} --signing-key-file ${pool_hotkey_sk_file}" 2
-  if ! ${CCLI} shelley node key-gen-KES --verification-key-file "${pool_hotkey_vk_file}" --signing-key-file "${pool_hotkey_sk_file}"; then return 1; fi
-  say "$ ${CCLI} shelley node issue-op-cert --kes-verification-key-file ${pool_hotkey_vk_file} --cold-signing-key-file ${pool_coldkey_sk_file} --operational-certificate-issue-counter-file ${pool_opcert_counter_file} --kes-period ${current_kes_period} --out-file ${pool_opcert_file}" 2
-  if ! ${CCLI} shelley node issue-op-cert --kes-verification-key-file "${pool_hotkey_vk_file}" --cold-signing-key-file "${pool_coldkey_sk_file}" --operational-certificate-issue-counter-file "${pool_opcert_counter_file}" --kes-period "${current_kes_period}" --out-file "${pool_opcert_file}"; then return 1; fi
+  say "$ ${CCLI} node key-gen-KES --verification-key-file ${pool_hotkey_vk_file} --signing-key-file ${pool_hotkey_sk_file}" 2
+  if ! ${CCLI} node key-gen-KES --verification-key-file "${pool_hotkey_vk_file}" --signing-key-file "${pool_hotkey_sk_file}"; then return 1; fi
+  say "$ ${CCLI} node issue-op-cert --kes-verification-key-file ${pool_hotkey_vk_file} --cold-signing-key-file ${pool_coldkey_sk_file} --operational-certificate-issue-counter-file ${pool_opcert_counter_file} --kes-period ${current_kes_period} --out-file ${pool_opcert_file}" 2
+  if ! ${CCLI} node issue-op-cert --kes-verification-key-file "${pool_hotkey_vk_file}" --cold-signing-key-file "${pool_coldkey_sk_file}" --operational-certificate-issue-counter-file "${pool_opcert_counter_file}" --kes-period "${current_kes_period}" --out-file "${pool_opcert_file}"; then return 1; fi
   chmod 700 ${POOL_FOLDER}/${pool_name}/*
 
   kesExpiration "${current_kes_period}"
-}
-
-
-function printTable() {
-  local -r delimiter="${1}"
-  local -r data="$(removeEmptyLines "${2}")"
-  if [[ "${delimiter}" != '' && "$(isEmptyString "${data}")" = 'false' ]]; then
-    local -r numberOfLines="$(wc -l <<< "${data}")"
-    if [[ "${numberOfLines}" -gt '0' ]]; then
-      local table=''
-      local i=1
-      for ((i = 1; i <= "${numberOfLines}"; i = i + 1)); do
-        local line=''
-        line="$(sed "${i}q;d" <<< "${data}")"
-        local numberOfColumns='0'
-        numberOfColumns="$(awk -F "${delimiter}" '{print NF}' <<< "${line}")"
-        # Add Line Delimiter
-        if [[ "${i}" -eq '1' ]]; then
-          table="${table}$(printf '%s@+' "$(repeatString '@+' "${numberOfColumns}")")"
-        fi
-        # Add Header Or Body
-        table="${table}\n"
-        local j=1
-        for ((j = 1; j <= "${numberOfColumns}"; j = j + 1)); do
-          table="${table}$(printf '@| %s' "$(cut -d "${delimiter}" -f "${j}" <<< "${line}")")"
-        done
-        table="${table}@|\n"
-        # Add Line Delimiter
-        if [[ "${i}" -eq '1' ]] || [[ "${numberOfLines}" -gt '1' && "${i}" -eq "${numberOfLines}" ]]; then
-          table="${table}$(printf '%s@+' "$(repeatString '@+' "${numberOfColumns}")")"
-        fi
-      done
-      if [[ "$(isEmptyString "${table}")" = 'false' ]]; then
-        echo -e "${table}" | column -s '@' -t | awk '/^\+/{gsub(" ", "-", $0)}1'
-      fi
-    fi
-  fi
-}
-
-function removeEmptyLines() {
-  local -r content="${1}"
-  echo -e "${content}" | sed '/^\s*$/d'
-}
-
-function repeatString() {
-  local -r string="${1}"
-  local -r numberToRepeat="${2}"
-  if [[ "${string}" != '' && "${numberToRepeat}" =~ ^[1-9][0-9]*$ ]]; then
-    local -r result="$(printf "%${numberToRepeat}s")"
-    echo -e "${result// /${string}}"
-  fi
-}
-
-function isEmptyString() {
-  local -r string="${1}"
-  if [[ "$(trimString "${string}")" = '' ]]; then
-    echo 'true' && return 0
-  fi
-  echo 'false' && return 1
-}
-
-function trimString() {
-  local -r string="${1}"
-  sed 's,^[[:blank:]]*,,' <<< "${string}" | sed 's,[[:blank:]]*$,,'
 }
