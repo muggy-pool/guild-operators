@@ -1,5 +1,6 @@
 #!/bin/bash
 # shellcheck disable=SC2086,SC1090
+# shellcheck source=/dev/null
 
 unset CNODE_HOME
 
@@ -14,7 +15,8 @@ unset CNODE_HOME
 #FORCE_OVERWRITE='N'    # Force overwrite of all files including normally saved user config sections in env, cnode.sh and gLiveView.sh
                         # topology.json, config.json and genesis files normally saved will also be overwritten
 #LIBSODIUM_FORK='N'     # Use IOG fork of libsodium - Recommended as per IOG instructions (Default: system build)
-#INSTALL_CNCLI='N'      # Install/Upgrade and build CNCLI with RUST - IOG fork of libsodium required
+#INSTALL_CNCLI='N'      # Install/Upgrade and build CNCLI with RUST
+#INSTALL_VCHC='N'       # Install/Upgrade Vacuumlabs cardano-hw-cli for hardware wallet support
 #CNODE_NAME='cnode'     # Alternate name for top level folder, non alpha-numeric chars will be replaced with underscore (Default: cnode)
 #CURL_TIMEOUT=60        # Maximum time in seconds that you allow the file download operation to take before aborting (Default: 60s)
 #UPDATE_CHECK='Y'       # Check if there is an updated version of prereqs.sh script to download
@@ -50,10 +52,12 @@ err_exit() {
   exit 1
 }
 
+versionCheck() { printf '%s\n%s' "${1//v/}" "${2//v/}" | sort -C -V; } #$1=available_version, $2=installed_version
+
 usage() {
   cat <<EOF >&2
 
-Usage: $(basename "$0") [-f] [-s] [-i] [-l] [-c] [-b <branch>] [-n <testnet|guild>] [-t <name>] [-m <seconds>]
+Usage: $(basename "$0") [-f] [-s] [-i] [-l] [-c] [-b <branch>] [-n <testnet|guild|launchpad>] [-t <name>] [-m <seconds>]
 Install pre-requisites for building cardano node and using CNTools
 
 -f    Force overwrite of all files including normally saved user config sections in env, cnode.sh and gLiveView.sh
@@ -64,7 +68,8 @@ Install pre-requisites for building cardano node and using CNTools
 -t    Alternate name for top level folder, non alpha-numeric chars will be replaced with underscore (Default: cnode)
 -m    Maximum time in seconds that you allow the file download operation to take before aborting (Default: 60s)
 -l    Use IOG fork of libsodium - Recommended as per IOG instructions (Default: system build)
--c    Install/Upgrade and build CNCLI with RUST - IOG fork of libsodium required
+-c    Install/Upgrade and build CNCLI with RUST
+-w    Install/Upgrade Vacuumlabs cardano-hw-cli for hardware wallet support
 -b    Use alternate branch of scripts to download - only recommended for testing/development (Default: master)
 -i    Interactive mode (Default: silent mode)
 
@@ -72,7 +77,7 @@ EOF
   exit 1
 }
 
-while getopts :in:sflct:m:b: opt; do
+while getopts :in:sflcwt:m:b: opt; do
   case ${opt} in
     i ) INTERACTIVE='Y' ;;
     n ) NETWORK=${OPTARG} ;;
@@ -80,6 +85,7 @@ while getopts :in:sflct:m:b: opt; do
     f ) FORCE_OVERWRITE='Y' ;;
     l ) LIBSODIUM_FORK='Y' ;;
     c ) INSTALL_CNCLI='Y' ;;
+    w ) INSTALL_VCHC='Y' ;;
     t ) CNODE_NAME=${OPTARG//[^[:alnum:]]/_} ;;
     m ) CURL_TIMEOUT=${OPTARG} ;;
     b ) BRANCH=${OPTARG} ;;
@@ -94,6 +100,7 @@ shift $((OPTIND -1))
 [[ -z ${FORCE_OVERWRITE} ]] && FORCE_OVERWRITE='N'
 [[ -z ${LIBSODIUM_FORK} ]] && LIBSODIUM_FORK='N'
 [[ -z ${INSTALL_CNCLI} ]] && INSTALL_CNCLI='N'
+[[ -z ${INSTALL_VCHC} ]] && INSTALL_VCHC='N'
 [[ -z ${CNODE_NAME} ]] && CNODE_NAME='cnode'
 [[ -z ${INTERACTIVE} ]] && INTERACTIVE='N'
 [[ -z ${CURL_TIMEOUT} ]] && CURL_TIMEOUT=60
@@ -110,9 +117,7 @@ dirs -c # clear dir stack
 CNODE_PATH="/opt/cardano"
 CNODE_HOME=${CNODE_PATH}/${CNODE_NAME}
 CNODE_VNAME=$(echo "$CNODE_NAME" | awk '{print toupper($0)}')
-if [[ -z "${BRANCH}" ]]; then
-  [[ -f "${CNODE_HOME}"/scripts/.env_branch ]] && BRANCH="$(cat ${CNODE_HOME}/scripts/.env_branch)" || BRANCH="master"
-fi
+[[ -z "${BRANCH}" ]] && BRANCH="master"
 
 REPO="https://github.com/cardano-community/guild-operators"
 REPO_RAW="https://raw.githubusercontent.com/cardano-community/guild-operators"
@@ -171,7 +176,7 @@ if [ "$WANT_BUILD_DEPS" = 'Y' ]; then
     $sudo apt-get -y install curl > /dev/null
     $sudo apt-get -y update > /dev/null
     echo "  Installing missing prerequisite packages, if any.."
-    pkg_list="libpq-dev python3 build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev systemd libsystemd-dev libsodium-dev zlib1g-dev make g++ tmux git jq libncursesw5 gnupg aptitude libtool autoconf secure-delete iproute2 bc tcptraceroute dialog sqlite libsqlite3-dev"
+    pkg_list="libpq-dev python3 build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev systemd libsystemd-dev libsodium-dev zlib1g-dev make g++ tmux git jq libncursesw5 gnupg aptitude libtool autoconf secure-delete iproute2 bc tcptraceroute dialog sqlite automake sqlite3 bsdmainutils"
     $sudo apt-get -y install ${pkg_list} > /dev/null;rc=$?
     if [ $rc != 0 ]; then
       echo "An error occurred while installing the prerequisite packages, please investigate by using the command below:"
@@ -186,7 +191,7 @@ if [ "$WANT_BUILD_DEPS" = 'Y' ]; then
     $sudo yum -y install curl > /dev/null
     $sudo yum -y update > /dev/null
     echo "  Installing missing prerequisite packages, if any.."
-    pkg_list="python3 coreutils pkgconfig libffi-devel gmp-devel openssl-devel ncurses-libs ncurses-compat-libs systemd systemd-devel libsodium-devel zlib-devel make gcc-c++ tmux git jq gnupg libtool autoconf srm iproute bc tcptraceroute dialog sqlite libsqlite3x-devel"
+    pkg_list="python3 coreutils pkgconfig libffi-devel gmp-devel openssl-devel ncurses-libs ncurses-compat-libs systemd systemd-devel libsodium-devel zlib-devel make gcc-c++ tmux git jq gnupg libtool autoconf srm iproute bc tcptraceroute dialog sqlite util-linux xz"
     [[ ! "${DISTRO}" =~ Fedora ]] && $sudo yum -y install epel-release > /dev/null
     $sudo yum -y install ${pkg_list} > /dev/null;rc=$?
     if [ $rc != 0 ]; then
@@ -227,11 +232,10 @@ if [ "$WANT_BUILD_DEPS" = 'Y' ]; then
     unset BOOTSTRAP_HASKELL_NONINTERACTIVE
     export BOOTSTRAP_HASKELL_NO_UPGRADE=1
     curl -s -m ${CURL_TIMEOUT} --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sed -e 's#read.*#answer=Y;next_answer=Y;hls_answer=N#' | bash
-    # shellcheck source=/dev/null
     . "${HOME}"/.ghcup/env
 
-    ghcup install 8.10.2
-    ghcup set 8.10.2
+    ghcup install ghc 8.10.2
+    ghcup set ghc 8.10.2
     ghc --version
 
     echo "Installing bundled Cabal .."
@@ -250,7 +254,7 @@ if grep -q "${CNODE_VNAME}_HOME" "${HOME}"/.bashrc; then
 else
   echo "Setting up Environment Variable"
   echo "export ${CNODE_VNAME}_HOME=${CNODE_HOME}" >> "${HOME}"/.bashrc
-  # shellcheck source=/dev/null
+  
   . "${HOME}/".bashrc
 fi
 
@@ -273,24 +277,19 @@ if [[ "${LIBSODIUM_FORK}" = "Y" ]]; then
 fi
 
 if [[ "${INSTALL_CNCLI}" = "Y" ]]; then
-  [[ ! -f /usr/local/lib/libsodium.so ]] && err_exit "IOG fork of libsodium is a pre-requisite for CNCLI, run '$(basename "$0") -h' to list available options"
-  if command -v cncli >/dev/null; then 
-    IFS=" " read -r -a cncli_version <<< "$(cncli -V | cut -d' ' -f2 | tr '.' ' ')"
-    cncli_version_nbr=$(( ${cncli_version[0]:-0}*10000 + ${cncli_version[1]:-0}*100 + ${cncli_version[2]:-0} ))
-  else cncli_version_nbr=0; fi
+  if command -v cncli >/dev/null; then cncli_version="$(cncli -V | cut -d' ' -f2)"; else cncli_version="v0.0.0"; fi
   pushd "${HOME}"/git >/dev/null || err_exit
   if [[ -d ./cncli ]]; then
     echo "previous CNCLI installation found, pulling latest version from GitHub..."
     pushd ./cncli >/dev/null || err_exit
-    if ! output=$(git pull 2>&1); then echo -e "${output}" && err_exit; fi
+    if ! output=$(git fetch 2>&1); then echo -e "${output}" && err_exit; fi
   else
     echo "downloading CNCLI..."
     if ! output=$(git clone https://github.com/AndrewWestberg/cncli.git 2>&1); then echo -e "${output}" && err_exit; fi
     pushd ./cncli >/dev/null || err_exit
   fi
-  IFS=" " read -r -a cncli_git_version <<< "$(grep ^version Cargo.toml | cut -d'"' -f2 | tr '.' ' ')"
-  cncli_git_version_nbr=$(( ${cncli_git_version[0]:-0}*10000 + ${cncli_git_version[1]:-0}*100 + ${cncli_git_version[2]:-0} ))
-  if [[ ${cncli_version_nbr} -lt ${cncli_git_version_nbr} ]]; then
+  cncli_git_latestTag=$(git tag 2>/dev/null | tail -n 1)
+  if ! versionCheck "${cncli_git_latestTag}" "${cncli_version}"; then
     # install rust if not available
     if ! command -v "rustup" &>/dev/null; then
       echo "installing RUST..."
@@ -300,10 +299,45 @@ if [[ "${INSTALL_CNCLI}" = "Y" ]]; then
       rustup update &>/dev/null #ignore any errors, not crucial that update succeed
     fi
     . "${HOME}"/.profile # source profile to load ${HOME}/.cargo/bin into PATH
+    git checkout --quiet ${cncli_git_latestTag}
+    echo "building CNCLI..."
     if ! output=$(cargo install --path . --force 2>&1); then echo -e "${output}" && err_exit; fi
     echo "$(cncli -V) installed!"
   else
     echo "CNCLI already latest version [$(cncli -V | cut -d' ' -f2)], skipping!"
+  fi
+fi
+
+if [[ "${INSTALL_VCHC}" = "Y" ]]; then
+  if command -v cardano-hw-cli >/dev/null; then vchc_version="$(cardano-hw-cli version 2>/dev/null | head -n 1 | cut -d' ' -f6)"; else vchc_version="0.0.0"; fi
+  echo "downloading Vacuumlabs cardano-hw-cli..."
+  pushd /tmp >/dev/null || err_exit
+  rm -rf cardano-hw-cli*
+  vchc_asset_url="$(curl -s https://api.github.com/repos/vacuumlabs/cardano-hw-cli/releases/latest | jq -r '.assets[].browser_download_url' | grep '_linux-x64.tar.gz')"
+  if curl -sL -m ${CURL_TIMEOUT} -o cardano-hw-cli_linux-x64.tar.gz ${vchc_asset_url}; then
+    tar zxf cardano-hw-cli_linux-x64.tar.gz &>/dev/null
+    rm -f cardano-hw-cli_linux-x64.tar.gz
+    [[ -f cardano-hw-cli/cardano-hw-cli ]] || err_exit "ERROR!! cardano-hw-cli downloaded but binary not found after extracting package!"
+    vchc_git_version="$(cardano-hw-cli/cardano-hw-cli version 2>/dev/null | head -n 1 | cut -d' ' -f6)"
+    if ! versionCheck "${vchc_git_version}" "${vchc_version}"; then
+      mkdir -p "${HOME}"/bin
+      pushd "${HOME}"/bin >/dev/null || err_exit
+      mv -f /tmp/cardano-hw-cli .
+      if ! grep -q "cardano-hw-cli" "${HOME}"/.bashrc; then
+        echo "adding cardano-hw-cli to PATH and setting Ledger udev rules, reload shell to take effect!"
+        echo "PATH=\"$HOME/bin/cardano-hw-cli:\$PATH\"" >> "${HOME}"/.bashrc
+        wget -q -O - https://raw.githubusercontent.com/LedgerHQ/udev-rules/master/add_udev_rules.sh | $sudo bash
+        $sudo sed -e "s@TAG+=\"uaccess\"@OWNER=\"$USER\", TAG+=\"uaccess\"@g" -i /etc/udev/rules.d/20-hw1.rules
+        $sudo udevadm control --reload-rules
+        $sudo udevadm trigger
+      fi
+      echo "cardano-hw-cli v${vchc_git_version} installed!"
+    else
+      rm -rf cardano-hw-cli #cleanup in /tmp
+      echo "cardano-hw-cli already latest version [${vchc_version}], skipping!"
+    fi
+  else
+    err_exit "ERROR!! Download of latest release of cardano-hw-cli from GitHub failed! Please retry or manually install"
   fi
 fi
 
@@ -326,6 +360,11 @@ if [[ ${NETWORK} = "testnet" ]]; then
   curl -sL -m ${CURL_TIMEOUT} -o genesis.json.tmp https://hydra.iohk.io/job/Cardano/iohk-nix/cardano-deployment/latest-finished/download/1/testnet-shelley-genesis.json
   curl -sL -m ${CURL_TIMEOUT} -o topology.json.tmp https://hydra.iohk.io/job/Cardano/iohk-nix/cardano-deployment/latest-finished/download/1/testnet-topology.json
   curl -s -m ${CURL_TIMEOUT} -o config.json.tmp ${URL_RAW}/files/config-combinator.json
+elif [[ ${NETWORK} = "launchpad" ]]; then
+  curl -sL -m ${CURL_TIMEOUT} -o byron-genesis.json.tmp https://hydra.iohk.io/job/Cardano/iohk-nix/cardano-deployment/latest-finished/download/1/launchpad-byron-genesis.json
+  curl -sL -m ${CURL_TIMEOUT} -o genesis.json.tmp https://hydra.iohk.io/job/Cardano/iohk-nix/cardano-deployment/latest-finished/download/1/launchpad-shelley-genesis.json
+  curl -sL -m ${CURL_TIMEOUT} -o topology.json.tmp https://hydra.iohk.io/job/Cardano/iohk-nix/cardano-deployment/latest-finished/download/1/launchpad-topology.json
+  curl -s -m ${CURL_TIMEOUT} -o config.json.tmp ${URL_RAW}/files/config-launchpad.json
 elif [[ ${NETWORK} = "guild" ]]; then
   curl -s -m ${CURL_TIMEOUT} -o byron-genesis.json.tmp ${URL_RAW}/files/byron-genesis.json
   curl -s -m ${CURL_TIMEOUT} -o genesis.json.tmp ${URL_RAW}/files/genesis.json

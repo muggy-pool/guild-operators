@@ -1,16 +1,18 @@
 {
   "ApplicationName": "cardano-sl",
-  "ApplicationVersion": 1,
+  "ApplicationVersion": 0,
   "ByronGenesisFile": "/opt/cardano/cnode/files/byron-genesis.json",
-  "ByronGenesisHash": "5f20df933584822601f9e3f8c024eb5eb252fe8cefb24d1317dc3d432e940ebb",
+  "ByronGenesisHash": "3815702729e4ba80ed3b6fc900be90a4b276daf5fcb4132c588cb038bff611f0",
   "LastKnownBlockVersion-Alt": 0,
-  "LastKnownBlockVersion-Major": 3,
+  "LastKnownBlockVersion-Major": 4,
   "LastKnownBlockVersion-Minor": 0,
   "MaxKnownMajorProtocolVersion": 2,
+  "PBftSignatureThreshold": 0.9,
   "Protocol": "Cardano",
-  "RequiresNetworkMagic": "RequiresNoMagic",
+  "RequiresNetworkMagic": "RequiresMagic",
   "ShelleyGenesisFile": "/opt/cardano/cnode/files/genesis.json",
-  "ShelleyGenesisHash": "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81",
+  "ShelleyGenesisHash": "8587fca9128b0470dcaf928f00bb2bd99dec5047e080a2da3aa419bd17023d75",
+  "TestShelleyHardForkAtEpoch": 2,
   "MaxConcurrencyDeadline": 2,
   "TraceBlockFetchClient": true,
   "TraceBlockFetchDecisions": true,
@@ -74,10 +76,10 @@
       "cardano.node.peers": [
         "EKGViewBK"
       ],
-      "cardano.node.resources": [
+      "cardano.node.metrics": [
         "EKGViewBK"
       ],
-      "cardano.node.metrics": [
+      "cardano.node.resources": [
         "EKGViewBK"
       ]
     },
@@ -157,9 +159,5 @@
       "scFormat": "ScJson",
       "scRotation": null
     }
-  ],
-  "SocketPath": "/opt/cardano/cnode/sockets/node0.socket",
-  "NetworkName": "mainnet",
-  "EnableLogging": true,
-  "EnableLogMetrics": false
+  ]
 }
